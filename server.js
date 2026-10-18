@@ -15,8 +15,9 @@ function generateSign(trackId, quality, codecs, transports, ts) {
   return hmac.endsWith("=") ? hmac.slice(0, -1) : hmac;
 }
 
-function yandexRequest(targetUrl, token) {
+function yandexRequest(targetUrl, token, method = "GET", postData = null) {
   return new Promise((resolve, reject) => {
+    const parsed = new URL(targetUrl);
     const headers = {
       "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
       "X-Yandex-Music-Client": CLIENT_HEADER,
@@ -26,20 +27,27 @@ function yandexRequest(targetUrl, token) {
     if (token) {
       headers["Authorization"] = token.startsWith("OAuth ") ? token : `OAuth ${token}`;
     }
+    if (postData) {
+      headers["Content-Type"] = "application/json";
+    }
 
-    const req = https.get(targetUrl, { headers }, (res) => {
+    const req = https.request(parsed, { method, headers }, (res) => {
       let data = "";
       res.on("data", (chunk) => (data += chunk));
       res.on("end", () => {
         try {
-          const parsed = JSON.parse(data);
-          resolve({ status: res.statusCode, data: parsed });
+          const parsedJson = JSON.parse(data);
+          resolve({ status: res.statusCode, data: parsedJson });
         } catch (e) {
           resolve({ status: res.statusCode, raw: data });
         }
       });
     });
     req.on("error", reject);
+    if (postData) {
+      req.write(JSON.stringify(postData));
+    }
+    req.end();
   });
 }
 
@@ -74,11 +82,15 @@ const server = http.createServer(async (req, res) => {
       const result = await yandexRequest(searchUrl, token);
       const items = result.data?.tracks?.results || result.data?.result?.tracks?.items || [];
       const cleanTracks = items.map((t) => ({
-        id: t.id,
+        id: String(t.id),
         title: t.title,
         artists: t.artists ? t.artists.map((a) => a.name).join(", ") : "Unknown",
         album: t.albums && t.albums[0] ? t.albums[0].title : null,
-        coverUri: t.coverUri ? "https://" + t.coverUri.replace("%%", "200x200") : (t.ogImage ? "https://" + t.ogImage.replace("%%", "200x200") : null),
+        coverUri: t.coverUri
+          ? "https://" + t.coverUri.replace("%%", "200x200")
+          : t.ogImage
+          ? "https://" + t.ogImage.replace("%%", "200x200")
+          : null,
         durationMs: t.durationMs || 0,
       }));
       res.writeHead(200, { "Content-Type": "application/json" });
@@ -90,32 +102,50 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  // --- API: My Wave (Моя Волна) ---
+  // --- API: My Wave (Моя Волна) with continuous session progression ---
   if (pathname === "/api/wave") {
     const token = query.token || null;
-    const waveUrl = "https://api.music.yandex.net/rotor/station/user:onyourwave/tracks";
+    const sessionId = query.sessionId || null;
+
+    let targetUrl;
+    let method = "GET";
+    let body = null;
+
+    if (sessionId) {
+      targetUrl = `https://api.music.yandex.net/rotor/session/${encodeURIComponent(sessionId)}/tracks`;
+      method = "POST";
+      body = {};
+    } else {
+      targetUrl = "https://api.music.yandex.net/rotor/station/user:onyourwave/tracks";
+      method = "GET";
+    }
 
     try {
-      const result = await yandexRequest(waveUrl, token);
+      const result = await yandexRequest(targetUrl, token, method, body);
+      const radioSessionId = result.data?.radioSessionId || sessionId;
       const sequence = result.data?.sequence || result.data?.result?.sequence || [];
 
-      // Filter out Promo ads ("Промокод Upgrade")
+      // Filter out promo ads ("Промокод Upgrade")
       const cleanTracks = sequence
         .filter((item) => item.track && item.track.title !== "Промокод Upgrade")
         .map((item) => {
           const t = item.track;
           return {
-            id: t.id,
+            id: String(t.id),
             title: t.title,
             artists: t.artists ? t.artists.map((a) => a.name).join(", ") : "Unknown",
             album: t.albums && t.albums[0] ? t.albums[0].title : null,
-            coverUri: t.coverUri ? "https://" + t.coverUri.replace("%%", "400x400") : (t.ogImage ? "https://" + t.ogImage.replace("%%", "400x400") : null),
+            coverUri: t.coverUri
+              ? "https://" + t.coverUri.replace("%%", "400x400")
+              : t.ogImage
+              ? "https://" + t.ogImage.replace("%%", "400x400")
+              : null,
             durationMs: t.durationMs || 0,
           };
         });
 
       res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ tracks: cleanTracks }));
+      res.end(JSON.stringify({ tracks: cleanTracks, radioSessionId }));
     } catch (e) {
       res.writeHead(500, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ error: e.message }));

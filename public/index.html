@@ -16,16 +16,61 @@
         <i class="fa-solid fa-bolt" style="color: #ffcc00;"></i>
         <span>Яндекс Музыка</span>
       </div>
-      <div class="badge-plus">ПЛЮС АКТИВЕН</div>
+      <div class="header-actions">
+        <button id="headerSearchBtn" class="header-icon-btn" title="Поиск">
+          <i class="fa-solid fa-magnifying-glass"></i>
+        </button>
+        <span class="badge-plus">ПЛЮС</span>
+      </div>
     </header>
+
+    <!-- Global Quick Search Bar -->
+    <div class="global-search-container">
+      <div class="search-bar-wrapper">
+        <i class="fa-solid fa-magnifying-glass search-icon"></i>
+        <input type="text" id="searchInput" placeholder="Поиск треков, артистов, альбомов..." autocomplete="off">
+        <button id="searchClearBtn" class="search-clear hidden"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+      <div class="quick-tags">
+        <span class="tag-chip" data-query="Король и Шут">Король и Шут</span>
+        <span class="tag-chip" data-query="Miyagi">Miyagi</span>
+        <span class="tag-chip" data-query="Кино">Кино</span>
+        <span class="tag-chip" data-query="Баста">Баста</span>
+        <span class="tag-chip" data-query="Linkin Park">Linkin Park</span>
+        <span class="tag-chip" data-query="Фонк">Фонк</span>
+        <span class="tag-chip" data-query="Queen">Queen</span>
+      </div>
+    </div>
 
     <!-- Main Content Area -->
     <main class="content-area">
+      <!-- Search Overlay / Tab -->
+      <section id="tab-search" class="tab-content">
+        <div class="search-screen">
+          <div class="search-header-row">
+            <h3 id="searchTitle">Результаты поиска</h3>
+            <span id="searchCount" class="search-count-badge"></span>
+          </div>
+
+          <div id="searchLoader" class="loader hidden">
+            <i class="fa-solid fa-circle-notch fa-spin"></i>
+            <p>Ищем музыку...</p>
+          </div>
+
+          <div id="searchResults" class="track-list">
+            <div class="search-empty-state">
+              <i class="fa-solid fa-music"></i>
+              <p>Введите запрос или выберите тег сверху</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
       <!-- Section: My Wave -->
       <section id="tab-wave" class="tab-content active">
         <div class="wave-screen">
           <div class="wave-visual-container">
-            <div class="wave-circle" id="waveBtn">
+            <div class="wave-circle" id="waveBtn" title="Нажмите для запуска / паузы">
               <img id="waveCover" src="" alt="Cover" class="wave-cover hidden">
               <div id="wavePlaceholder" class="wave-placeholder">
                 <i class="fa-solid fa-water"></i>
@@ -35,37 +80,23 @@
 
           <div class="wave-info">
             <h2 id="waveTrackTitle">Моя Волна</h2>
-            <p id="waveTrackArtist">Нажмите для запуска персонального потока</p>
+            <p id="waveTrackArtist">Нажмите на волну для запуска</p>
+            <div id="waveNextPreview" class="wave-next-preview hidden">
+              <i class="fa-solid fa-forward"></i> Далее: <span id="waveNextTitle">—</span>
+            </div>
           </div>
 
           <div class="wave-controls">
-            <button class="btn-circle btn-secondary" id="btnDislike" title="Не нравится">
-              <i class="fa-regular fa-thumbs-down"></i>
+            <button class="btn-circle btn-secondary" id="btnDislike" title="Пропустить трек">
+              <i class="fa-solid fa-forward-step"></i>
             </button>
             <button class="btn-circle btn-primary" id="btnWavePlay" title="Играть / Пауза">
               <i class="fa-solid fa-play" id="wavePlayIcon"></i>
             </button>
-            <button class="btn-circle btn-secondary" id="btnWaveNext" title="Следующий">
-              <i class="fa-solid fa-forward-step"></i>
+            <button class="btn-circle btn-secondary" id="btnWaveNext" title="Следующий новый трек">
+              <i class="fa-solid fa-shuffle"></i>
             </button>
           </div>
-        </div>
-      </section>
-
-      <!-- Section: Search -->
-      <section id="tab-search" class="tab-content">
-        <div class="search-screen">
-          <div class="search-bar-wrapper">
-            <i class="fa-solid fa-magnifying-glass search-icon"></i>
-            <input type="text" id="searchInput" placeholder="Трек, исполнитель или альбом..." autocomplete="off">
-            <button id="searchClearBtn" class="search-clear hidden"><i class="fa-solid fa-xmark"></i></button>
-          </div>
-
-          <div id="searchLoader" class="loader hidden">
-            <i class="fa-solid fa-circle-notch fa-spin"></i>
-          </div>
-
-          <div id="searchResults" class="track-list"></div>
         </div>
       </section>
 
@@ -77,7 +108,7 @@
               <i class="fa-solid fa-shield-halved status-icon"></i>
               <div>
                 <h3>Обход Плюса & Рекламы</h3>
-                <p>Активен • HMAC-SHA256 подпись прямых аудиопотоков</p>
+                <p>Бесконечная Волна • HMAC-SHA256 подпись • Без рекламы</p>
               </div>
             </div>
           </div>
@@ -87,7 +118,7 @@
             <div class="quality-options">
               <label class="radio-label">
                 <input type="radio" name="quality" value="lossless">
-                <span>FLAC (Lossless High-Res)</span>
+                <span>FLAC (Lossless)</span>
               </label>
               <label class="radio-label">
                 <input type="radio" name="quality" value="nq" checked>
@@ -102,9 +133,9 @@
 
           <div class="card">
             <h3>Яндекс OAuth Токен (опционально)</h3>
-            <p class="card-desc">Позволяет загружать персональные рекомендации «Моей Волны» и плейлисты вашего аккаунта.</p>
+            <p class="card-desc">Позволяет подключить персональные рекомендации Моей Волны вашего аккаунта.</p>
             <div class="token-input-group">
-              <input type="password" id="tokenInput" placeholder="Вставьте токен...">
+              <input type="password" id="tokenInput" placeholder="OAuth токен...">
               <button id="saveTokenBtn" class="btn-accent">Сохранить</button>
             </div>
           </div>
@@ -124,10 +155,10 @@
           <div class="mini-artist" id="miniArtist">—</div>
         </div>
         <div class="mini-actions">
-          <button id="miniPlayBtn" class="btn-icon">
+          <button id="miniPlayBtn" class="btn-icon" title="Воспроизведение / Пауза">
             <i class="fa-solid fa-play" id="miniPlayIcon"></i>
           </button>
-          <button id="miniNextBtn" class="btn-icon">
+          <button id="miniNextBtn" class="btn-icon" title="Следующий">
             <i class="fa-solid fa-forward-step"></i>
           </button>
         </div>

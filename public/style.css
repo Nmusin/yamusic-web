@@ -7,7 +7,7 @@
 }
 
 body {
-  background-color: #121212;
+  background-color: #0c0c0c;
   color: #ffffff;
   overflow: hidden;
   height: 100vh;
@@ -22,26 +22,40 @@ body {
   margin: 0 auto;
   position: relative;
   background-color: #121212;
-  box-shadow: 0 0 40px rgba(0, 0, 0, 0.8);
+  box-shadow: 0 0 40px rgba(0, 0, 0, 0.9);
 }
 
 /* Header */
 .app-header {
-  height: 56px;
+  height: 52px;
   display: flex;
   align-items: center;
   justify-content: space-between;
   padding: 0 16px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
   flex-shrink: 0;
 }
 
 .logo {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   font-weight: 700;
   font-size: 18px;
+}
+
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.header-icon-btn {
+  background: transparent;
+  border: none;
+  color: #fff;
+  font-size: 18px;
+  cursor: pointer;
+  padding: 6px;
 }
 
 .badge-plus {
@@ -49,9 +63,83 @@ body {
   color: #000;
   font-size: 10px;
   font-weight: 800;
-  padding: 4px 8px;
+  padding: 3px 8px;
   border-radius: 12px;
   letter-spacing: 0.5px;
+}
+
+/* Global Search Bar & Chips */
+.global-search-container {
+  padding: 4px 16px 10px 16px;
+  background: #121212;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  flex-shrink: 0;
+}
+
+.search-bar-wrapper {
+  display: flex;
+  align-items: center;
+  background-color: #1e1e1e;
+  border-radius: 12px;
+  padding: 0 14px;
+  height: 42px;
+}
+
+.search-icon {
+  color: #888;
+  margin-right: 10px;
+  font-size: 15px;
+}
+
+.search-bar-wrapper input {
+  flex: 1;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: #fff;
+  font-size: 15px;
+}
+
+.search-bar-wrapper input::placeholder {
+  color: #777;
+}
+
+.search-clear {
+  background: transparent;
+  border: none;
+  color: #888;
+  cursor: pointer;
+  padding: 6px;
+}
+
+.quick-tags {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  padding-top: 10px;
+  scrollbar-width: none;
+}
+
+.quick-tags::-webkit-scrollbar {
+  display: none;
+}
+
+.tag-chip {
+  background: #222;
+  color: #ddd;
+  font-size: 12px;
+  padding: 5px 12px;
+  border-radius: 16px;
+  white-space: nowrap;
+  cursor: pointer;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  transition: all 0.2s;
+}
+
+.tag-chip:hover, .tag-chip:active {
+  background: #ffcc00;
+  color: #000;
+  border-color: #ffcc00;
 }
 
 /* Content Area */
@@ -59,12 +147,12 @@ body {
   flex: 1;
   overflow-y: auto;
   position: relative;
-  padding-bottom: 120px; /* space for mini-player + nav */
+  padding-bottom: 130px; /* space for mini-player + nav */
 }
 
 .tab-content {
   display: none;
-  height: 100%;
+  min-height: 100%;
 }
 
 .tab-content.active {
@@ -78,12 +166,12 @@ body {
   align-items: center;
   justify-content: center;
   min-height: 100%;
-  padding: 24px 16px;
+  padding: 20px 16px;
   text-align: center;
 }
 
 .wave-visual-container {
-  margin: 30px 0;
+  margin: 20px 0;
   position: relative;
 }
 
@@ -96,7 +184,7 @@ body {
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  box-shadow: 0 0 35px rgba(255, 204, 0, 0.4);
+  box-shadow: 0 0 35px rgba(255, 204, 0, 0.35);
   transition: transform 0.3s ease, box-shadow 0.3s ease;
   overflow: hidden;
   position: relative;
@@ -104,12 +192,12 @@ body {
 
 .wave-circle.playing {
   animation: pulseWave 1.8s infinite ease-in-out;
-  box-shadow: 0 0 50px rgba(255, 204, 0, 0.7);
+  box-shadow: 0 0 55px rgba(255, 204, 0, 0.7);
 }
 
 @keyframes pulseWave {
   0% { transform: scale(1); }
-  50% { transform: scale(1.08); }
+  50% { transform: scale(1.06); }
   100% { transform: scale(1); }
 }
 
@@ -126,13 +214,13 @@ body {
 }
 
 .wave-info {
-  margin-bottom: 30px;
+  margin-bottom: 24px;
 }
 
 .wave-info h2 {
-  font-size: 22px;
+  font-size: 21px;
   font-weight: 700;
-  margin-bottom: 6px;
+  margin-bottom: 4px;
   max-width: 320px;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -141,8 +229,22 @@ body {
 
 .wave-info p {
   color: #999;
-  font-size: 15px;
+  font-size: 14px;
   max-width: 320px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wave-next-preview {
+  margin-top: 8px;
+  font-size: 12px;
+  color: #ffcc00;
+  background: rgba(255, 204, 0, 0.1);
+  padding: 4px 12px;
+  border-radius: 12px;
+  display: inline-block;
+  max-width: 300px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -170,16 +272,16 @@ body {
 }
 
 .btn-primary {
-  width: 68px;
-  height: 68px;
+  width: 66px;
+  height: 66px;
   background-color: #ffcc00;
   color: #000;
   font-size: 24px;
 }
 
 .btn-secondary {
-  width: 52px;
-  height: 52px;
+  width: 50px;
+  height: 50px;
   background-color: rgba(255, 255, 255, 0.1);
   color: #fff;
   font-size: 18px;
@@ -190,48 +292,45 @@ body {
   padding: 16px;
 }
 
-.search-bar-wrapper {
+.search-header-row {
   display: flex;
+  justify-content: space-between;
   align-items: center;
-  background-color: #1f1f1f;
-  border-radius: 12px;
-  padding: 0 14px;
-  height: 48px;
-  margin-bottom: 16px;
+  margin-bottom: 12px;
 }
 
-.search-icon {
-  color: #777;
-  margin-right: 10px;
-}
-
-.search-bar-wrapper input {
-  flex: 1;
-  background: transparent;
-  border: none;
-  outline: none;
-  color: #fff;
+.search-header-row h3 {
   font-size: 16px;
+  font-weight: 700;
 }
 
-.search-clear {
-  background: transparent;
-  border: none;
-  color: #777;
-  cursor: pointer;
-  padding: 6px;
+.search-count-badge {
+  font-size: 12px;
+  color: #888;
+}
+
+.search-empty-state {
+  text-align: center;
+  padding: 50px 20px;
+  color: #666;
+}
+
+.search-empty-state i {
+  font-size: 40px;
+  margin-bottom: 12px;
+  color: #444;
 }
 
 .track-list {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 8px;
 }
 
 .track-item {
   display: flex;
   align-items: center;
-  padding: 10px;
+  padding: 8px 10px;
   background: #181818;
   border-radius: 10px;
   cursor: pointer;
@@ -245,10 +344,10 @@ body {
 .track-item img {
   width: 48px;
   height: 48px;
-  border-radius: 6px;
+  border-radius: 8px;
   object-fit: cover;
   margin-right: 12px;
-  background-color: #333;
+  background-color: #2a2a2a;
 }
 
 .track-info {
@@ -273,6 +372,21 @@ body {
   margin-top: 3px;
 }
 
+.track-play-btn {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: rgba(255, 204, 0, 0.15);
+  color: #ffcc00;
+  border: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  margin-left: 8px;
+  flex-shrink: 0;
+}
+
 /* Settings Screen */
 .settings-screen {
   padding: 16px;
@@ -289,7 +403,7 @@ body {
 
 .status-card {
   background: linear-gradient(135deg, #1c1c1c 0%, #262215 100%);
-  border: 1px solid rgba(255, 204, 0, 0.2);
+  border: 1px solid rgba(255, 204, 0, 0.25);
 }
 
 .status-header {
@@ -338,7 +452,7 @@ body {
   gap: 10px;
   font-size: 15px;
   cursor: pointer;
-  padding: 8px 4px;
+  padding: 6px 4px;
 }
 
 .radio-label input[type="radio"] {
@@ -378,11 +492,11 @@ body {
   bottom: 60px;
   left: 8px;
   right: 8px;
-  background: rgba(30, 30, 30, 0.95);
+  background: rgba(26, 26, 26, 0.95);
   backdrop-filter: blur(16px);
   border-radius: 12px;
   overflow: hidden;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.6);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.7);
   z-index: 10;
   transition: transform 0.2s, opacity 0.2s;
 }
@@ -440,7 +554,7 @@ body {
 
 .mini-actions {
   display: flex;
-  gap: 12px;
+  gap: 10px;
 }
 
 .btn-icon {
@@ -494,10 +608,17 @@ body {
 
 .loader {
   display: flex;
-  justify-content: center;
-  padding: 24px;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 30px;
   font-size: 28px;
   color: #ffcc00;
+}
+
+.loader p {
+  font-size: 14px;
+  color: #888;
 }
 
 .hidden {
