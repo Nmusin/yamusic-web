@@ -30,7 +30,7 @@
     <div id="guestWarningBanner" class="guest-banner">
       <div class="guest-banner-content">
         <i class="fa-solid fa-triangle-exclamation"></i>
-        <span>Без аккаунта Яндекс даёт только 30 сек. Войдите, чтобы слушать треки целиком!</span>
+        <span>Без входа в аккаунт треки играют только 30 сек.</span>
       </div>
       <button id="bannerLoginBtn" class="banner-login-btn">Войти</button>
     </div>
@@ -127,8 +127,8 @@
               </div>
             </div>
             <div class="profile-actions">
-              <button id="settingsLoginBtn" class="btn-accent">Войти через Яндекс</button>
-              <button id="settingsLogoutBtn" class="btn-danger hidden">Выйти</button>
+              <button id="settingsLoginBtn" class="btn-accent">Войти в Яндекс</button>
+              <button id="settingsLogoutBtn" class="btn-danger hidden">Выйти из аккаунта</button>
             </div>
           </div>
 
@@ -203,7 +203,7 @@
       </button>
     </nav>
 
-    <!-- Login Modal -->
+    <!-- One-Click Device Login Modal -->
     <div id="loginModal" class="modal hidden">
       <div class="modal-backdrop" id="modalBackdrop"></div>
       <div class="modal-content">
@@ -213,31 +213,42 @@
         </div>
         <div class="modal-body">
           <p class="modal-desc">
-            Яндекс требует авторизацию в аккаунте для выдачи треков <strong>полной длины</strong> (без входа отдаются 30-секундные превью). Наличие активного Плюса <strong>не обязательно</strong> — мод разблокирует полный доступ бесплатно!
+            Для прослушивания треков <strong>целиком</strong> подтвердите вход. Наличие платного Плюса <strong>не требуется</strong> — мод откроет полный доступ бесплатно!
           </p>
 
-          <div class="login-step">
-            <div class="step-num">1</div>
-            <div class="step-text">
-              <strong>Нажмите для авторизации:</strong>
-              <p>Откроется официальная безопасная страница Яндекса</p>
-              <a id="oauthLinkBtn" href="https://oauth.yandex.ru/authorize?response_type=token&client_id=23cabbbdc6cd418abb4b9c13238361ae" target="_blank" class="btn-yandex-oauth">
-                <i class="fa-brands fa-yandex"></i> Открыть вход Яндекса
-              </a>
+          <!-- Loading state for code -->
+          <div id="deviceCodeLoading" class="device-loading">
+            <i class="fa-solid fa-circle-notch fa-spin"></i>
+            <p>Генерация кода входа...</p>
+          </div>
+
+          <!-- Code container -->
+          <div id="deviceCodeContainer" class="device-code-box hidden">
+            <div class="code-label">Ваш одноразовый код:</div>
+            <div class="code-display" id="displayUserCode">--------</div>
+
+            <a id="openYaDeviceBtn" href="https://ya.ru/device" target="_blank" class="btn-ya-confirm">
+              <i class="fa-brands fa-yandex"></i> Подтвердить на ya.ru/device
+            </a>
+
+            <div class="polling-status">
+              <i class="fa-solid fa-circle-notch fa-spin"></i>
+              <span>Ожидаем подтверждения в Яндексе...</span>
             </div>
           </div>
 
-          <div class="login-step">
-            <div class="step-num">2</div>
-            <div class="step-text">
-              <strong>Вставьте ссылку или токен:</strong>
-              <p>После нажатия «Войти» скопируйте адрес страницы (или сам токен после <code>access_token=</code>) и вставьте сюда:</p>
-              <div class="modal-input-group">
-                <input type="text" id="modalTokenInput" placeholder="https://music.yandex.ru/#access_token=y0_... или сам токен">
-                <button id="confirmLoginBtn" class="btn-accent">Войти</button>
-              </div>
+          <!-- Manual Token Toggle -->
+          <div class="manual-toggle-row">
+            <button id="toggleManualTokenBtn" class="text-btn">Или ввести токен вручную</button>
+          </div>
+
+          <div id="manualTokenBox" class="manual-token-box hidden">
+            <div class="modal-input-group">
+              <input type="text" id="manualTokenInput" placeholder="Вставьте OAuth токен...">
+              <button id="confirmManualTokenBtn" class="btn-accent">Войти</button>
             </div>
           </div>
+
           <div id="loginError" class="login-error hidden"></div>
         </div>
       </div>

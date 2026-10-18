@@ -10,6 +10,7 @@ let radioSessionId = null;
 let isFetchingMore = false;
 let playedTrackIds = new Set();
 let currentUser = null;
+let pollInterval = null;
 
 let quality = localStorage.getItem("ym_quality") || "nq";
 let oauthToken = localStorage.getItem("ym_token") || "";
@@ -62,8 +63,14 @@ const settingsLogoutBtn = document.getElementById("settingsLogoutBtn");
 const loginModal = document.getElementById("loginModal");
 const modalBackdrop = document.getElementById("modalBackdrop");
 const closeModalBtn = document.getElementById("closeModalBtn");
-const modalTokenInput = document.getElementById("modalTokenInput");
-const confirmLoginBtn = document.getElementById("confirmLoginBtn");
+const deviceCodeLoading = document.getElementById("deviceCodeLoading");
+const deviceCodeContainer = document.getElementById("deviceCodeContainer");
+const displayUserCode = document.getElementById("displayUserCode");
+const openYaDeviceBtn = document.getElementById("openYaDeviceBtn");
+const toggleManualTokenBtn = document.getElementById("toggleManualTokenBtn");
+const manualTokenBox = document.getElementById("manualTokenBox");
+const manualTokenInput = document.getElementById("manualTokenInput");
+const confirmManualTokenBtn = document.getElementById("confirmManualTokenBtn");
 const loginError = document.getElementById("loginError");
 
 // Initialize Quality settings
@@ -81,16 +88,96 @@ document.querySelectorAll('input[name="quality"]').forEach((radio) => {
   });
 });
 
-// Modal Open / Close
-function openLoginModal() {
+// Modal Open / Close & Device Code Flow
+async function openLoginModal() {
   loginModal.classList.remove("hidden");
-  modalTokenInput.value = "";
+  deviceCodeLoading.classList.remove("hidden");
+  deviceCodeContainer.classList.add("hidden");
   loginError.classList.add("hidden");
-  modalTokenInput.focus();
+  manualTokenBox.classList.add("hidden");
+  stopPolling();
+
+  try {
+    const res = await fetch("/api/auth/device-code");
+    const data = await res.json();
+
+    if (data.ok && data.userCode) {
+      displayUserCode.textContent = data.userCode;
+      openYaDeviceBtn.href = data.verificationUrl;
+      deviceCodeLoading.classList.add("hidden");
+      deviceCodeContainer.classList.remove("hidden");
+
+      // Start Polling for confirmation
+      startPolling(data.deviceCode, data.interval || 3);
+    } else {
+      deviceCodeLoading.classList.add("hidden");
+      showLoginError(data.error || "Не удалось запросить код входа.");
+    }
+  } catch (e) {
+    deviceCodeLoading.classList.add("hidden");
+    showLoginError("Ошибка сети: " + e.message);
+  }
 }
 
 function closeLoginModal() {
   loginModal.classList.add("hidden");
+  stopPolling();
+}
+
+function startPolling(deviceCode, intervalSec) {
+  stopPolling();
+  pollInterval = setInterval(async () => {
+    try {
+      const res = await fetch(`/api/auth/device-token?deviceCode=${encodeURIComponent(deviceCode)}`);
+      const data = await res.json();
+
+      if (data.status === "success" && data.accessToken) {
+        stopPolling();
+        await onLoginSuccess(data.accessToken);
+      } else if (data.status === "error") {
+        stopPolling();
+        showLoginError("Ошибка авторизации: " + (data.error || "время действия кода истекло."));
+      }
+    } catch (e) {
+      console.error("Poll error:", e);
+    }
+  }, Math.max(intervalSec, 3) * 1000);
+}
+
+function stopPolling() {
+  if (pollInterval) {
+    clearInterval(pollInterval);
+    pollInterval = null;
+  }
+}
+
+async function onLoginSuccess(token) {
+  oauthToken = token;
+  localStorage.setItem("ym_token", token);
+
+  const res = await fetch(`/api/account?token=${encodeURIComponent(token)}`);
+  const data = await res.json();
+
+  if (data.loggedIn && data.user) {
+    currentUser = data.user;
+    updateAuthUI(true);
+    closeLoginModal();
+
+    alert(`Добро пожаловать, ${data.user.fullName || data.user.login}! Все треки разблокированы без ограничений.`);
+
+    // If currently playing 30s preview, restart full track
+    if (currentTrack) {
+      playTrack(currentTrack, audio.currentTime);
+    }
+  } else {
+    updateAuthUI(true);
+    closeLoginModal();
+  }
+}
+
+function showLoginError(msg) {
+  loginError.textContent = msg;
+  loginError.classList.remove("hidden");
 }
 
 authBtn.addEventListener("click", () => {
@@ -105,60 +192,23 @@ settingsLoginBtn.addEventListener("click", openLoginModal);
 closeModalBtn.addEventListener("click", closeLoginModal);
 modalBackdrop.addEventListener("click", closeLoginModal);
 
-// Verify / Parse Token & Login
-async function verifyAndSaveToken(rawInput) {
-  let token = rawInput.trim();
-  // Support pasting full URL like https://music.yandex.ru/#access_token=y0_AgAAAA...
-  const match = token.match(/access_token=([^&]+)/);
-  if (match) {
-    token = match[1];
+toggleManualTokenBtn.addEventListener("click", () => {
+  manualTokenBox.classList.toggle("hidden");
+  if (!manualTokenBox.classList.contains("hidden")) {
+    manualTokenInput.focus();
   }
-
-  if (!token) {
-    showLoginError("Пожалуйста, вставьте ссылку или токен");
-    return;
-  }
-
-  confirmLoginBtn.textContent = "Проверка...";
-  try {
-    const res = await fetch(`/api/account?token=${encodeURIComponent(token)}`);
-    const data = await res.json();
-
-    if (data.loggedIn && data.user) {
-      oauthToken = token;
-      localStorage.setItem("ym_token", token);
-      currentUser = data.user;
-      updateAuthUI(true);
-      closeLoginModal();
-      alert(`Добро пожаловать, ${data.user.fullName || data.user.login}! Полный доступ разблокирован.`);
-
-      // If playing 30s preview, restart full track
-      if (currentTrack) {
-        playTrack(currentTrack, audio.currentTime);
-      }
-    } else {
-      showLoginError(data.error || "Неверный токен. Убедитесь, что скопировали строку целиком.");
-    }
-  } catch (e) {
-    showLoginError("Ошибка сети при проверке: " + e.message);
-  } finally {
-    confirmLoginBtn.textContent = "Войти";
-  }
-}
-
-function showLoginError(msg) {
-  loginError.textContent = msg;
-  loginError.classList.remove("hidden");
-}
-
-confirmLoginBtn.addEventListener("click", () => {
-  verifyAndSaveToken(modalTokenInput.value);
 });
 
-modalTokenInput.addEventListener("keydown", (e) => {
-  if (e.key === "Enter") {
-    verifyAndSaveToken(modalTokenInput.value);
+confirmManualTokenBtn.addEventListener("click", () => {
+  let token = manualTokenInput.value.trim();
+  const match = token.match(/access_token=([^&]+)/);
+  if (match) token = match[1];
+
+  if (!token) {
+    showLoginError("Введите токен");
+    return;
   }
+  onLoginSuccess(token);
 });
 
 // Logout

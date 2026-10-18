@@ -9,6 +9,10 @@ const PORT = process.env.PORT || 3000;
 const SECRET_KEY = "kzqU4XhfCaY6B6JTHODeq5";
 const CLIENT_HEADER = "YandexMusicDesktopAppWindows/5.46.2";
 
+// Official Yandex Music Device OAuth credentials (from MarshalX/yandex-music-token)
+const OAUTH_CLIENT_ID = "23cabbbdc6cd418abb4b39c32c41195d";
+const OAUTH_CLIENT_SECRET = "53bc75238f0c4d08a118e51fe9203300";
+
 function generateSign(trackId, quality, codecs, transports, ts) {
   const data = `${ts}${trackId}${quality}${codecs.join("")}${transports}`;
   const hmac = crypto.createHmac("sha256", SECRET_KEY).update(data).digest("base64");
@@ -51,6 +55,34 @@ function yandexRequest(targetUrl, token, method = "GET", postData = null) {
   });
 }
 
+function httpsPostForm(targetUrl, params) {
+  return new Promise((resolve, reject) => {
+    const parsed = new URL(targetUrl);
+    const body = new URLSearchParams(params).toString();
+    const headers = {
+      "Content-Type": "application/x-www-form-urlencoded",
+      "Content-Length": Buffer.byteLength(body),
+      "User-Agent": "YandexMusic/5.46.2",
+    };
+
+    const req = https.request(parsed, { method: "POST", headers }, (res) => {
+      let data = "";
+      res.on("data", (chunk) => (data += chunk));
+      res.on("end", () => {
+        try {
+          const parsedJson = JSON.parse(data);
+          resolve({ status: res.statusCode, data: parsedJson });
+        } catch (e) {
+          resolve({ status: res.statusCode, raw: data });
+        }
+      });
+    });
+    req.on("error", reject);
+    req.write(body);
+    req.end();
+  });
+}
+
 const server = http.createServer(async (req, res) => {
   const parsedUrl = url.parse(req.url, true);
   const pathname = parsedUrl.pathname;
@@ -64,6 +96,73 @@ const server = http.createServer(async (req, res) => {
   if (req.method === "OPTIONS") {
     res.writeHead(200);
     res.end();
+    return;
+  }
+
+  // --- API: Request Device Code for One-Click Login ---
+  if (pathname === "/api/auth/device-code") {
+    try {
+      const deviceId = "ym-mod-" + Date.now();
+      const result = await httpsPostForm("https://oauth.yandex.ru/device/code", {
+        client_id: OAUTH_CLIENT_ID,
+        device_id: deviceId,
+        device_name: "Yandex Music Web Mod",
+      });
+
+      if (result.status === 200 && result.data?.user_code) {
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(
+          JSON.stringify({
+            ok: true,
+            userCode: result.data.user_code,
+            deviceCode: result.data.device_code,
+            verificationUrl: `https://ya.ru/device?user_code=${result.data.user_code}`,
+            interval: result.data.interval || 5,
+            expiresIn: result.data.expires_in || 300,
+          })
+        );
+      } else {
+        res.writeHead(500, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ ok: false, error: result.data?.error_description || "Error requesting device code" }));
+      }
+    } catch (e) {
+      res.writeHead(500, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: false, error: e.message }));
+    }
+    return;
+  }
+
+  // --- API: Poll for Token Confirmation ---
+  if (pathname === "/api/auth/device-token") {
+    const deviceCode = query.deviceCode;
+    if (!deviceCode) {
+      res.writeHead(400, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Missing deviceCode" }));
+      return;
+    }
+
+    try {
+      const result = await httpsPostForm("https://oauth.yandex.ru/token", {
+        grant_type: "device_code",
+        code: deviceCode,
+        client_id: OAUTH_CLIENT_ID,
+        client_secret: OAUTH_CLIENT_SECRET,
+      });
+
+      if (result.status === 200 && result.data?.access_token) {
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ status: "success", accessToken: result.data.access_token }));
+      } else if (result.data?.error === "authorization_pending") {
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ status: "pending" }));
+      } else {
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ status: "error", error: result.data?.error_description || result.data?.error }));
+      }
+    } catch (e) {
+      res.writeHead(500, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ status: "error", error: e.message }));
+    }
     return;
   }
 

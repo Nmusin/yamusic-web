@@ -193,7 +193,7 @@ body {
   flex: 1;
   overflow-y: auto;
   position: relative;
-  padding-bottom: 130px; /* space for mini-player + nav */
+  padding-bottom: 130px;
 }
 
 .tab-content {
@@ -680,7 +680,7 @@ body {
   color: #ffcc00;
 }
 
-/* Modal */
+/* Device Modal & Styles */
 .modal {
   position: fixed;
   inset: 0;
@@ -703,7 +703,7 @@ body {
   background: #1e1e1e;
   border-radius: 16px;
   width: 100%;
-  max-width: 480px;
+  max-width: 440px;
   box-shadow: 0 12px 36px rgba(0, 0, 0, 0.9);
   border: 1px solid rgba(255, 255, 255, 0.1);
   overflow: hidden;
@@ -738,68 +738,101 @@ body {
   font-size: 13px;
   color: #aaa;
   line-height: 1.5;
-  margin-bottom: 20px;
+  margin-bottom: 16px;
 }
 
-.login-step {
+.device-loading {
   display: flex;
-  gap: 14px;
-  margin-bottom: 18px;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 24px;
+  color: #ffcc00;
+  font-size: 24px;
 }
 
-.step-num {
-  width: 28px;
-  height: 28px;
-  border-radius: 50%;
-  background: #ffcc00;
-  color: #000;
+.device-loading p {
+  font-size: 13px;
+  color: #888;
+}
+
+.device-code-box {
+  background: #141414;
+  border: 1px solid #2a2a2a;
+  border-radius: 14px;
+  padding: 18px;
+  text-align: center;
+  margin-bottom: 16px;
+}
+
+.code-label {
+  font-size: 12px;
+  color: #888;
+  margin-bottom: 6px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.code-display {
+  font-size: 32px;
   font-weight: 800;
+  letter-spacing: 4px;
+  color: #ffcc00;
+  font-family: monospace;
+  margin-bottom: 16px;
+  user-select: all;
+}
+
+.btn-ya-confirm {
   display: flex;
   align-items: center;
   justify-content: center;
-  flex-shrink: 0;
-}
-
-.step-text {
-  flex: 1;
-}
-
-.step-text strong {
-  font-size: 14px;
-  display: block;
-  margin-bottom: 4px;
-}
-
-.step-text p {
-  font-size: 12px;
-  color: #888;
-  margin-bottom: 10px;
-  line-height: 1.4;
-}
-
-.step-text code {
-  background: #2a2a2a;
-  padding: 2px 5px;
-  border-radius: 4px;
-  color: #ffcc00;
-}
-
-.btn-yandex-oauth {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
+  gap: 10px;
   background: #ffcc00;
   color: #000;
   text-decoration: none;
-  font-weight: 700;
-  font-size: 13px;
-  padding: 8px 16px;
-  border-radius: 8px;
-  transition: opacity 0.2s;
+  font-weight: 800;
+  font-size: 15px;
+  padding: 12px 20px;
+  border-radius: 10px;
+  transition: transform 0.15s, opacity 0.2s;
+  box-shadow: 0 4px 16px rgba(255, 204, 0, 0.3);
 }
 
-.btn-yandex-oauth:hover {
-  opacity: 0.9;
+.btn-ya-confirm:active {
+  transform: scale(0.97);
+}
+
+.polling-status {
+  margin-top: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  font-size: 12px;
+  color: #888;
+}
+
+.polling-status i {
+  color: #ffcc00;
+}
+
+.manual-toggle-row {
+  text-align: center;
+  margin-top: 8px;
+}
+
+.text-btn {
+  background: transparent;
+  border: none;
+  color: #777;
+  font-size: 12px;
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+.manual-token-box {
+  margin-top: 12px;
 }
 
 .modal-input-group {
