@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Яндекс Музыка — Web Mod</title>
+  <meta name="theme-color" content="#121212">
+  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+</head>
+<body>
+  <div class="app-container">
+    <!-- Header -->
+    <header class="app-header">
+      <div class="logo">
+        <i class="fa-solid fa-bolt" style="color: #ffcc00;"></i>
+        <span>Яндекс Музыка</span>
+      </div>
+      <div class="badge-plus">ПЛЮС АКТИВЕН</div>
+    </header>
+
+    <!-- Main Content Area -->
+    <main class="content-area">
+      <!-- Section: My Wave -->
+      <section id="tab-wave" class="tab-content active">
+        <div class="wave-screen">
+          <div class="wave-visual-container">
+            <div class="wave-circle" id="waveBtn">
+              <img id="waveCover" src="" alt="Cover" class="wave-cover hidden">
+              <div id="wavePlaceholder" class="wave-placeholder">
+                <i class="fa-solid fa-water"></i>
+              </div>
+            </div>
+          </div>
+
+          <div class="wave-info">
+            <h2 id="waveTrackTitle">Моя Волна</h2>
+            <p id="waveTrackArtist">Нажмите для запуска персонального потока</p>
+          </div>
+
+          <div class="wave-controls">
+            <button class="btn-circle btn-secondary" id="btnDislike" title="Не нравится">
+              <i class="fa-regular fa-thumbs-down"></i>
+            </button>
+            <button class="btn-circle btn-primary" id="btnWavePlay" title="Играть / Пауза">
+              <i class="fa-solid fa-play" id="wavePlayIcon"></i>
+            </button>
+            <button class="btn-circle btn-secondary" id="btnWaveNext" title="Следующий">
+              <i class="fa-solid fa-forward-step"></i>
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <!-- Section: Search -->
+      <section id="tab-search" class="tab-content">
+        <div class="search-screen">
+          <div class="search-bar-wrapper">
+            <i class="fa-solid fa-magnifying-glass search-icon"></i>
+            <input type="text" id="searchInput" placeholder="Трек, исполнитель или альбом..." autocomplete="off">
+            <button id="searchClearBtn" class="search-clear hidden"><i class="fa-solid fa-xmark"></i></button>
+          </div>
+
+          <div id="searchLoader" class="loader hidden">
+            <i class="fa-solid fa-circle-notch fa-spin"></i>
+          </div>
+
+          <div id="searchResults" class="track-list"></div>
+        </div>
+      </section>
+
+      <!-- Section: Settings -->
+      <section id="tab-settings" class="tab-content">
+        <div class="settings-screen">
+          <div class="card status-card">
+            <div class="status-header">
+              <i class="fa-solid fa-shield-halved status-icon"></i>
+              <div>
+                <h3>Обход Плюса & Рекламы</h3>
+                <p>Активен • HMAC-SHA256 подпись прямых аудиопотоков</p>
+              </div>
+            </div>
+          </div>
+
+          <div class="card">
+            <h3>Качество аудио</h3>
+            <div class="quality-options">
+              <label class="radio-label">
+                <input type="radio" name="quality" value="lossless">
+                <span>FLAC (Lossless High-Res)</span>
+              </label>
+              <label class="radio-label">
+                <input type="radio" name="quality" value="nq" checked>
+                <span>Высокое (320 kbps)</span>
+              </label>
+              <label class="radio-label">
+                <input type="radio" name="quality" value="lq">
+                <span>Обычное (192 kbps)</span>
+              </label>
+            </div>
+          </div>
+
+          <div class="card">
+            <h3>Яндекс OAuth Токен (опционально)</h3>
+            <p class="card-desc">Позволяет загружать персональные рекомендации «Моей Волны» и плейлисты вашего аккаунта.</p>
+            <div class="token-input-group">
+              <input type="password" id="tokenInput" placeholder="Вставьте токен...">
+              <button id="saveTokenBtn" class="btn-accent">Сохранить</button>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <!-- Bottom MiniPlayer -->
+    <div class="mini-player" id="miniPlayer">
+      <div class="mini-progress-bar-container" id="miniProgressBar">
+        <div class="mini-progress-bar-fill" id="miniProgressFill"></div>
+      </div>
+      <div class="mini-player-body">
+        <img id="miniCover" src="" class="mini-cover" alt="Cover">
+        <div class="mini-details">
+          <div class="mini-title" id="miniTitle">Нет трека</div>
+          <div class="mini-artist" id="miniArtist">—</div>
+        </div>
+        <div class="mini-actions">
+          <button id="miniPlayBtn" class="btn-icon">
+            <i class="fa-solid fa-play" id="miniPlayIcon"></i>
+          </button>
+          <button id="miniNextBtn" class="btn-icon">
+            <i class="fa-solid fa-forward-step"></i>
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Bottom Navigation Bar -->
+    <nav class="bottom-nav">
+      <button class="nav-btn active" data-tab="tab-wave">
+        <i class="fa-solid fa-water"></i>
+        <span>Волна</span>
+      </button>
+      <button class="nav-btn" data-tab="tab-search">
+        <i class="fa-solid fa-magnifying-glass"></i>
+        <span>Поиск</span>
+      </button>
+      <button class="nav-btn" data-tab="tab-settings">
+        <i class="fa-solid fa-gear"></i>
+        <span>Настройки</span>
+      </button>
+    </nav>
+  </div>
+
+  <audio id="audioElement" preload="auto"></audio>
+  <script src="app.js"></script>
+</body>
+</html>
