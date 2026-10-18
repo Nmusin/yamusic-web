@@ -17,12 +17,23 @@
         <span>Яндекс Музыка</span>
       </div>
       <div class="header-actions">
-        <button id="headerSearchBtn" class="header-icon-btn" title="Поиск">
-          <i class="fa-solid fa-magnifying-glass"></i>
+        <!-- Auth Button / Profile -->
+        <button id="authBtn" class="btn-auth" title="Войти в Яндекс">
+          <i class="fa-brands fa-yandex"></i>
+          <span id="authBtnText">Войти</span>
         </button>
         <span class="badge-plus">ПЛЮС</span>
       </div>
     </header>
+
+    <!-- Guest 30-sec Warning Banner (Hidden if logged in) -->
+    <div id="guestWarningBanner" class="guest-banner">
+      <div class="guest-banner-content">
+        <i class="fa-solid fa-triangle-exclamation"></i>
+        <span>Без аккаунта Яндекс даёт только 30 сек. Войдите, чтобы слушать треки целиком!</span>
+      </div>
+      <button id="bannerLoginBtn" class="banner-login-btn">Войти</button>
+    </div>
 
     <!-- Global Quick Search Bar -->
     <div class="global-search-container">
@@ -103,16 +114,36 @@
       <!-- Section: Settings -->
       <section id="tab-settings" class="tab-content">
         <div class="settings-screen">
+          <!-- Profile Card -->
+          <div class="card profile-card" id="profileCard">
+            <div class="profile-header">
+              <img id="profileAvatar" src="" class="profile-avatar hidden" alt="Avatar">
+              <div id="profileAvatarPlaceholder" class="profile-avatar-placeholder">
+                <i class="fa-solid fa-user"></i>
+              </div>
+              <div class="profile-info">
+                <h3 id="profileName">Не авторизован</h3>
+                <p id="profileStatus">Без аккаунта треки длятся 30 секунд</p>
+              </div>
+            </div>
+            <div class="profile-actions">
+              <button id="settingsLoginBtn" class="btn-accent">Войти через Яндекс</button>
+              <button id="settingsLogoutBtn" class="btn-danger hidden">Выйти</button>
+            </div>
+          </div>
+
+          <!-- Mod Status -->
           <div class="card status-card">
             <div class="status-header">
               <i class="fa-solid fa-shield-halved status-icon"></i>
               <div>
                 <h3>Обход Плюса & Рекламы</h3>
-                <p>Бесконечная Волна • HMAC-SHA256 подпись • Без рекламы</p>
+                <p>Бесконечная Волна • HMAC-SHA256 подпись • Полные треки</p>
               </div>
             </div>
           </div>
 
+          <!-- Audio Quality -->
           <div class="card">
             <h3>Качество аудио</h3>
             <div class="quality-options">
@@ -128,15 +159,6 @@
                 <input type="radio" name="quality" value="lq">
                 <span>Обычное (192 kbps)</span>
               </label>
-            </div>
-          </div>
-
-          <div class="card">
-            <h3>Яндекс OAuth Токен (опционально)</h3>
-            <p class="card-desc">Позволяет подключить персональные рекомендации Моей Волны вашего аккаунта.</p>
-            <div class="token-input-group">
-              <input type="password" id="tokenInput" placeholder="OAuth токен...">
-              <button id="saveTokenBtn" class="btn-accent">Сохранить</button>
             </div>
           </div>
         </div>
@@ -177,9 +199,49 @@
       </button>
       <button class="nav-btn" data-tab="tab-settings">
         <i class="fa-solid fa-gear"></i>
-        <span>Настройки</span>
+        <span>Профиль</span>
       </button>
     </nav>
+
+    <!-- Login Modal -->
+    <div id="loginModal" class="modal hidden">
+      <div class="modal-backdrop" id="modalBackdrop"></div>
+      <div class="modal-content">
+        <div class="modal-header">
+          <h3>Вход в Яндекс Аккаунт</h3>
+          <button id="closeModalBtn" class="modal-close"><i class="fa-solid fa-xmark"></i></button>
+        </div>
+        <div class="modal-body">
+          <p class="modal-desc">
+            Яндекс требует авторизацию в аккаунте для выдачи треков <strong>полной длины</strong> (без входа отдаются 30-секундные превью). Наличие активного Плюса <strong>не обязательно</strong> — мод разблокирует полный доступ бесплатно!
+          </p>
+
+          <div class="login-step">
+            <div class="step-num">1</div>
+            <div class="step-text">
+              <strong>Нажмите для авторизации:</strong>
+              <p>Откроется официальная безопасная страница Яндекса</p>
+              <a id="oauthLinkBtn" href="https://oauth.yandex.ru/authorize?response_type=token&client_id=23cabbbdc6cd418abb4b9c13238361ae" target="_blank" class="btn-yandex-oauth">
+                <i class="fa-brands fa-yandex"></i> Открыть вход Яндекса
+              </a>
+            </div>
+          </div>
+
+          <div class="login-step">
+            <div class="step-num">2</div>
+            <div class="step-text">
+              <strong>Вставьте ссылку или токен:</strong>
+              <p>После нажатия «Войти» скопируйте адрес страницы (или сам токен после <code>access_token=</code>) и вставьте сюда:</p>
+              <div class="modal-input-group">
+                <input type="text" id="modalTokenInput" placeholder="https://music.yandex.ru/#access_token=y0_... или сам токен">
+                <button id="confirmLoginBtn" class="btn-accent">Войти</button>
+              </div>
+            </div>
+          </div>
+          <div id="loginError" class="login-error hidden"></div>
+        </div>
+      </div>
+    </div>
   </div>
 
   <audio id="audioElement" preload="auto"></audio>

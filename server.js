@@ -67,6 +67,43 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  // --- API: Account Status / Login Verification ---
+  if (pathname === "/api/account") {
+    const token = query.token || req.headers["authorization"] || null;
+    if (!token) {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ loggedIn: false }));
+      return;
+    }
+
+    try {
+      const result = await yandexRequest("https://api.music.yandex.net/account/about", token);
+      if (result.status === 200 && result.data?.result) {
+        const u = result.data.result;
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(
+          JSON.stringify({
+            loggedIn: !!u.uid,
+            user: {
+              uid: u.uid,
+              login: u.login,
+              fullName: u.fullName || u.displayName || u.login,
+              avatarUrl: u.avatarUrl ? `https://avatars.yandex.net/get-yapic/${u.avatarUrl}/islands-200` : null,
+              hasPlus: true, // Spoofed Plus
+            },
+          })
+        );
+      } else {
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ loggedIn: false, error: "Invalid token" }));
+      }
+    } catch (e) {
+      res.writeHead(500, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ loggedIn: false, error: e.message }));
+    }
+    return;
+  }
+
   // --- API: Search ---
   if (pathname === "/api/search") {
     const text = query.q || "";

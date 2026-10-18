@@ -9,11 +9,12 @@ let isPlaying = false;
 let radioSessionId = null;
 let isFetchingMore = false;
 let playedTrackIds = new Set();
+let currentUser = null;
 
 let quality = localStorage.getItem("ym_quality") || "nq";
 let oauthToken = localStorage.getItem("ym_token") || "";
 
-// UI Elements
+// UI Elements - Wave
 const waveBtn = document.getElementById("waveBtn");
 const waveCover = document.getElementById("waveCover");
 const wavePlaceholder = document.getElementById("wavePlaceholder");
@@ -26,6 +27,7 @@ const btnWavePlay = document.getElementById("btnWavePlay");
 const btnWaveNext = document.getElementById("btnWaveNext");
 const btnDislike = document.getElementById("btnDislike");
 
+// UI Elements - MiniPlayer
 const miniPlayer = document.getElementById("miniPlayer");
 const miniCover = document.getElementById("miniCover");
 const miniTitle = document.getElementById("miniTitle");
@@ -36,6 +38,7 @@ const miniNextBtn = document.getElementById("miniNextBtn");
 const miniProgressBar = document.getElementById("miniProgressBar");
 const miniProgressFill = document.getElementById("miniProgressFill");
 
+// UI Elements - Search
 const searchInput = document.getElementById("searchInput");
 const searchClearBtn = document.getElementById("searchClearBtn");
 const searchLoader = document.getElementById("searchLoader");
@@ -43,11 +46,27 @@ const searchResults = document.getElementById("searchResults");
 const searchCount = document.getElementById("searchCount");
 const headerSearchBtn = document.getElementById("headerSearchBtn");
 
-const tokenInput = document.getElementById("tokenInput");
-const saveTokenBtn = document.getElementById("saveTokenBtn");
+// UI Elements - Auth & Profile
+const authBtn = document.getElementById("authBtn");
+const authBtnText = document.getElementById("authBtnText");
+const guestWarningBanner = document.getElementById("guestWarningBanner");
+const bannerLoginBtn = document.getElementById("bannerLoginBtn");
+const profileAvatar = document.getElementById("profileAvatar");
+const profileAvatarPlaceholder = document.getElementById("profileAvatarPlaceholder");
+const profileName = document.getElementById("profileName");
+const profileStatus = document.getElementById("profileStatus");
+const settingsLoginBtn = document.getElementById("settingsLoginBtn");
+const settingsLogoutBtn = document.getElementById("settingsLogoutBtn");
 
-// Initialize Settings
-tokenInput.value = oauthToken;
+// UI Elements - Modal
+const loginModal = document.getElementById("loginModal");
+const modalBackdrop = document.getElementById("modalBackdrop");
+const closeModalBtn = document.getElementById("closeModalBtn");
+const modalTokenInput = document.getElementById("modalTokenInput");
+const confirmLoginBtn = document.getElementById("confirmLoginBtn");
+const loginError = document.getElementById("loginError");
+
+// Initialize Quality settings
 const qualityRadio = document.querySelector(`input[name="quality"][value="${quality}"]`);
 if (qualityRadio) qualityRadio.checked = true;
 
@@ -62,11 +81,148 @@ document.querySelectorAll('input[name="quality"]').forEach((radio) => {
   });
 });
 
-saveTokenBtn.addEventListener("click", () => {
-  oauthToken = tokenInput.value.trim();
-  localStorage.setItem("ym_token", oauthToken);
-  alert("Токен сохранен!");
+// Modal Open / Close
+function openLoginModal() {
+  loginModal.classList.remove("hidden");
+  modalTokenInput.value = "";
+  loginError.classList.add("hidden");
+  modalTokenInput.focus();
+}
+
+function closeLoginModal() {
+  loginModal.classList.add("hidden");
+}
+
+authBtn.addEventListener("click", () => {
+  if (currentUser) {
+    switchTab("tab-settings");
+  } else {
+    openLoginModal();
+  }
 });
+bannerLoginBtn.addEventListener("click", openLoginModal);
+settingsLoginBtn.addEventListener("click", openLoginModal);
+closeModalBtn.addEventListener("click", closeLoginModal);
+modalBackdrop.addEventListener("click", closeLoginModal);
+
+// Verify / Parse Token & Login
+async function verifyAndSaveToken(rawInput) {
+  let token = rawInput.trim();
+  // Support pasting full URL like https://music.yandex.ru/#access_token=y0_AgAAAA...
+  const match = token.match(/access_token=([^&]+)/);
+  if (match) {
+    token = match[1];
+  }
+
+  if (!token) {
+    showLoginError("Пожалуйста, вставьте ссылку или токен");
+    return;
+  }
+
+  confirmLoginBtn.textContent = "Проверка...";
+  try {
+    const res = await fetch(`/api/account?token=${encodeURIComponent(token)}`);
+    const data = await res.json();
+
+    if (data.loggedIn && data.user) {
+      oauthToken = token;
+      localStorage.setItem("ym_token", token);
+      currentUser = data.user;
+      updateAuthUI(true);
+      closeLoginModal();
+      alert(`Добро пожаловать, ${data.user.fullName || data.user.login}! Полный доступ разблокирован.`);
+
+      // If playing 30s preview, restart full track
+      if (currentTrack) {
+        playTrack(currentTrack, audio.currentTime);
+      }
+    } else {
+      showLoginError(data.error || "Неверный токен. Убедитесь, что скопировали строку целиком.");
+    }
+  } catch (e) {
+    showLoginError("Ошибка сети при проверке: " + e.message);
+  } finally {
+    confirmLoginBtn.textContent = "Войти";
+  }
+}
+
+function showLoginError(msg) {
+  loginError.textContent = msg;
+  loginError.classList.remove("hidden");
+}
+
+confirmLoginBtn.addEventListener("click", () => {
+  verifyAndSaveToken(modalTokenInput.value);
+});
+
+modalTokenInput.addEventListener("keydown", (e) => {
+  if (e.key === "Enter") {
+    verifyAndSaveToken(modalTokenInput.value);
+  }
+});
+
+// Logout
+settingsLogoutBtn.addEventListener("click", () => {
+  if (confirm("Вы действительно хотите выйти из аккаунта?")) {
+    oauthToken = "";
+    currentUser = null;
+    localStorage.removeItem("ym_token");
+    updateAuthUI(false);
+  }
+});
+
+function updateAuthUI(isLoggedIn) {
+  if (isLoggedIn && currentUser) {
+    guestWarningBanner.classList.add("hidden");
+    authBtnText.textContent = currentUser.login || "Профиль";
+    authBtn.style.background = "#2a2a2a";
+    authBtn.style.color = "#ffcc00";
+
+    profileName.textContent = currentUser.fullName || currentUser.login;
+    profileStatus.textContent = "Аккаунт подключен • Плюс разблокирован";
+    if (currentUser.avatarUrl) {
+      profileAvatar.src = currentUser.avatarUrl;
+      profileAvatar.classList.remove("hidden");
+      profileAvatarPlaceholder.classList.add("hidden");
+    } else {
+      profileAvatar.classList.add("hidden");
+      profileAvatarPlaceholder.classList.remove("hidden");
+    }
+
+    settingsLoginBtn.classList.add("hidden");
+    settingsLogoutBtn.classList.remove("hidden");
+  } else {
+    guestWarningBanner.classList.remove("hidden");
+    authBtnText.textContent = "Войти";
+    authBtn.style.background = "#ffcc00";
+    authBtn.style.color = "#000";
+
+    profileName.textContent = "Не авторизован";
+    profileStatus.textContent = "Без аккаунта треки длятся 30 секунд";
+    profileAvatar.classList.add("hidden");
+    profileAvatarPlaceholder.classList.remove("hidden");
+
+    settingsLoginBtn.classList.remove("hidden");
+    settingsLogoutBtn.classList.add("hidden");
+  }
+}
+
+// Check initial token on startup
+if (oauthToken) {
+  fetch(`/api/account?token=${encodeURIComponent(oauthToken)}`)
+    .then((r) => r.json())
+    .then((data) => {
+      if (data.loggedIn && data.user) {
+        currentUser = data.user;
+        updateAuthUI(true);
+      } else {
+        updateAuthUI(false);
+      }
+    })
+    .catch(() => updateAuthUI(false));
+} else {
+  updateAuthUI(false);
+}
 
 // Tab Navigation
 function switchTab(tabId) {
@@ -182,12 +338,10 @@ function togglePlayPause() {
 }
 
 async function playNext() {
-  // If we have next track in queue
   if (queueIndex < queue.length - 1) {
     queueIndex++;
     playTrack(queue[queueIndex]);
   } else {
-    // End of current queue
     if (radioSessionId) {
       waveTrackTitle.textContent = "Загрузка новых треков...";
       waveTrackArtist.textContent = "Волна продолжается";
@@ -196,11 +350,9 @@ async function playNext() {
         queueIndex++;
         playTrack(queue[queueIndex]);
       } else {
-        // Fallback: start new wave
         startWave();
       }
     } else {
-      // In search or playlist mode, if finished, continue into My Wave!
       startWave();
     }
   }
@@ -224,7 +376,7 @@ miniProgressBar.addEventListener("click", (e) => {
 // "Моя Волна" Continuous Fetch (NO LOOPS / REPEATS)
 async function startWave() {
   waveTrackTitle.textContent = "Запуск Волны...";
-  waveTrackArtist.textContent = "Подбираем персональные треки...";
+  waveTrackArtist.textContent = "Подбираем треки...";
   radioSessionId = null;
   queue = [];
   queueIndex = 0;
@@ -237,7 +389,6 @@ async function startWave() {
     const data = await resp.json();
     if (data.tracks && data.tracks.length > 0) {
       radioSessionId = data.radioSessionId || null;
-      // Filter any already played in this browser session
       const freshTracks = data.tracks.filter((t) => !playedTrackIds.has(String(t.id)));
       queue = freshTracks.length > 0 ? freshTracks : data.tracks;
       queueIndex = 0;
@@ -265,7 +416,6 @@ async function fetchMoreWaveTracks() {
     if (data.tracks && data.tracks.length > 0) {
       if (data.radioSessionId) radioSessionId = data.radioSessionId;
 
-      // Add only unplayed tracks
       const newTracks = data.tracks.filter((t) => !playedTrackIds.has(String(t.id)));
       if (newTracks.length > 0) {
         queue.push(...newTracks);
@@ -378,7 +528,7 @@ function renderSearchResults(tracks) {
       </button>
     `;
     item.addEventListener("click", () => {
-      radioSessionId = null; // Exit wave session to play search playlist
+      radioSessionId = null;
       queue = tracks;
       queueIndex = index;
       playTrack(track);
