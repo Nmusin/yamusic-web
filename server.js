@@ -763,28 +763,18 @@ if (pathname === "/api/like" && req.method === "POST") {
       res.end(JSON.stringify({ ok: false, error: "Token invalid" }));
       return;
     }
-    // Working API shape (confirmed by probing): add-multiple supports add.
-    // NOTE: actual "unlike" is not supported by the API for this token scope —
-    // 14 request shapes were probed (dash/camel params, remove=1/true, form/json
-    // body, DELETE, if-revision). Every call bumps revision but never removes
-    // the track from the library, so we reject unlike upfront and keep UI honest.
-    if (body.remove) {
-      res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({
-        ok: false,
-        unsupported: true,
-        error: "Снятие лайка недоступно через API (подтверждено тестами)",
-      }));
-      return;
-    }
-    const addRemove = await yandexRequest(
-      `https://api.music.yandex.net/users/${accInfo.user.uid}/likes/tracks/add-multiple` +
-      `?track-ids=${encodeURIComponent(trackId)}` +
-      (body.albumId ? `&album-ids=${encodeURIComponent(String(body.albumId))}` : ""),
-      token, "POST", {}
-    );
+    // Working API shapes (confirmed by probing / live test 2026-10-19):
+    // add-multiple supports add; likes/tracks/remove actually deletes the like
+    // (status 200, result.revision bumps and the track leaves the library).
+    const uml = body.remove
+      ? `https://api.music.yandex.net/users/${accInfo.user.uid}/likes/tracks/remove` +
+        `?track-ids=${encodeURIComponent(trackId)}`
+      : `https://api.music.yandex.net/users/${accInfo.user.uid}/likes/tracks/add-multiple` +
+        `?track-ids=${encodeURIComponent(trackId)}` +
+        (body.albumId ? `&album-ids=${encodeURIComponent(String(body.albumId))}` : "");
+    const addRemove = await yandexRequest(uml, token, "POST", {});
     console.log(
-      `[LIKE] track=${trackId} album=${body.albumId || "-"} remove=0 -> status=${addRemove.status}`,
+      `[LIKE] track=${trackId} album=${body.albumId || "-"} remove=${body.remove ? "1" : "0"} -> status=${addRemove.status}`,
       JSON.stringify(addRemove.data).slice(0, 200)
     );
     const revision = addRemove.data?.revision ?? addRemove.data?.result?.revision ?? null;
