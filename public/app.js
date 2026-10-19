@@ -1439,3 +1439,8 @@ function updateMediaSession(track) {
     });
   }
 }
+
+// PWA: регистрация service worker (только https или localhost)
+if ("serviceWorker" in navigator && (/^https:$/.test(location.protocol) || location.hostname === "localhost")) {
+  navigator.serviceWorker.register("/sw.js").catch(() => {});
+}
