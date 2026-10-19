@@ -308,13 +308,14 @@ document.querySelectorAll('input[name="quality"]').forEach((radio) => {
 // Update Track Time Display (e.g. "1:23 / 3:45")
 function showTime() {
   if (!miniTime) return;
-  const fmt = (t) => {
-    if (!isFinite(t)) return "0:00";
-    const m = Math.floor(t / 60);
-    const s = Math.floor(t % 60);
-    return `${m}:${String(s).padStart(2, "0")}`;
-  };
-  miniTime.textContent = `${fmt(audio.currentTime)} / ${fmt(audio.duration)}`;
+  miniTime.textContent = `${formatSecs(audio.currentTime)} / ${formatSecs(audio.duration)}`;
+}
+
+function formatSecs(t) {
+  if (!isFinite(t)) return "0:00";
+  const m = Math.floor(t / 60);
+  const s = Math.floor(t % 60);
+  return `${m}:${String(s).padStart(2, "0")}`;
 }
 
 // Small toast notification (instead of alert)
@@ -1901,7 +1902,7 @@ function updateFullPlayerUI(track) {
   const liked = trackIdLiked(track);
   fullLikeIcon.className = liked ? "fa-solid fa-heart" : "fa-regular fa-heart";
   fullLikeBtn.classList.toggle("liked", liked);
-  fullTimeTotal.textContent = formatTime(track.durationMs ? track.durationMs / 1000 : (audio.duration || 0));
+  fullTimeTotal.textContent = formatSecs(track.durationMs ? track.durationMs / 1000 : (audio.duration || 0));
 }
 
 function updateFullProgress() {
@@ -1914,7 +1915,7 @@ function updateFullProgress() {
   const percent = Math.min(audio.currentTime / audio.duration, 1) * 100;
   fullProgressFill.style.width = percent + "%";
   fullProgressKnob.style.left = percent + "%";
-  fullTimeElapsed.textContent = formatTime(audio.currentTime);
+  fullTimeElapsed.textContent = formatSecs(audio.currentTime);
 }
 
 // Перемотка: drag-полоса (pointer events + setPointerCapture).
@@ -1945,7 +1946,7 @@ function scrubToClientX(clientX) {
   const percent = Math.min(seconds / audio.duration, 1) * 100;
   fullProgressFill.style.width = percent + "%";
   fullProgressKnob.style.left = percent + "%";
-  fullTimeElapsed.textContent = formatTime(seconds);
+  fullTimeElapsed.textContent = formatSecs(seconds);
 }
 
 function clientXToSeconds(clientX) {

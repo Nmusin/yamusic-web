@@ -1,7 +1,7 @@
 // Service Worker: честный кеш оболочки приложения.
 // Только GET; /api/* всегда мимо кеша; остальное — network-first с кеш-фолбэком.
 
-const CACHE = "ym-shell-v1";
+const CACHE = "ym-shell-v2";
 
 const PRECACHE = [
   "/",
