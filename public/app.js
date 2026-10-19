@@ -60,6 +60,111 @@ function sendPlayReport(finished) {
     .catch((e) => console.warn("play-audio report failed:", e));
 }
 
+// --- Session memory: очередь + позиция по ключу токена (ym_session:<hash>) ---
+let savedPos = 0;      // позиция восстановленного трека (до первого play)
+let lastPosSave = 0;   // троттлинг savePosition: не чаще 1 р/5 сек
+
+// Ключ пересчитывается при каждом использовании: oauthToken меняется в
+// onLoginSuccess/clearToken, старый ключ нельзя кешировать глобально.
+async function tokenKey() {
+  const tok = getToken();
+  if (tok && crypto && crypto.subtle) {
+    try {
+      const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(tok));
+      const hex = Array.from(new Uint8Array(buf))
+        .map((b) => b.toString(16).padStart(2, "0"))
+        .join("");
+      return "ym_session:" + hex.slice(0, 12);
+    } catch (e) {}
+  }
+  // http-контекст: crypto.subtle недоступен — сам строковый токен до 20 симв.
+  return "ym_session:" + (tok ? tok.slice(0, 20) : "guest");
+}
+
+function sessionSource() {
+  return radioSessionId ? "Моя Волна" : "Очередь";
+}
+
+//_posOverride: позиция момента проигрывания нового трека (иначе audio.currentTime)
+async function saveSession(posOverride) {
+  if (!queue.length || !currentTrack) return;
+  try {
+    // Хвост очереди (текущий + следующие), не длиннее 100 треков
+    let sliceStart = 0;
+    if (queue.length > 100) sliceStart = Math.max(0, queueIndex - 99);
+    const kept = queue.slice(sliceStart).map((t) => ({
+      id: t.id,
+      title: t.title,
+      artists: t.artists,
+      album: t.album || "",
+      albumId: t.albumId || "",
+      coverUri: t.coverUri || "",
+      durationMs: Number(t.durationMs) || 0,
+    }));
+    const savedIndex = queueIndex - sliceStart;
+    const pos = posOverride !== undefined ? Number(posOverride) || 0 : Math.round(audio.currentTime || savedPos || 0);
+    const payload = {
+      v: 1,
+      queue: kept,
+      queueIndex: savedIndex,
+      radioSessionId: radioSessionId,
+      source: sessionSource(),
+      playedTrackIds: Array.from(playedTrackIds).slice(-200),
+      pos: pos,
+      trackId: String(currentTrack.id),
+      token: (getToken() || "").slice(0, 12),
+    };
+    localStorage.setItem(await tokenKey(), JSON.stringify(payload));
+  } catch (e) {
+    console.warn("saveSession failed:", e);
+  }
+}
+
+function savePosition() {
+  if (!currentTrack || !audio.currentTime) return;
+  const now = Date.now();
+  if (now - lastPosSave < 5000) return;
+  lastPosSave = now;
+  saveSession();
+}
+
+// Молчаливое восстановление при загрузке: очередь + мини-плеер в паузе.
+// НЕ автостарт: первый playAudio-тап добирает сохранённую позицию из savedPos.
+async function restoreSession() {
+  try {
+    const raw = localStorage.getItem(await tokenKey());
+    if (!raw) return;
+    const data = JSON.parse(raw);
+    if (!data || data.v !== 1 || !Array.isArray(data.queue) || data.queue.length === 0) return;
+    const idx = Math.min(Math.max(0, data.queueIndex || 0), data.queue.length - 1);
+    queue = data.queue;
+    queueIndex = idx;
+    radioSessionId = data.radioSessionId || null;
+    playedTrackIds = new Set(Array.isArray(data.playedTrackIds) ? data.playedTrackIds.slice(-200) : []);
+    savedPos = Math.max(0, Number(data.pos) || 0);
+    const track = queue[queueIndex];
+    if (!track) return;
+
+    // Мини-плеер/волна: трек, пауза, прогресс на сохранённой позиции
+    updateTrackUI(track);
+    setPlayState(false);
+    const durSec = (track.durationMs || 0) / 1000;
+    if (savedPos && durSec) {
+      const fmt = (t) => {
+        const m = Math.floor(t / 60);
+        const s = Math.floor(t % 60);
+        return `${m}:${String(s).padStart(2, "0")}`;
+      };
+      miniProgressFill.style.width = Math.min(100, (savedPos / durSec) * 100) + "%";
+      miniTime.textContent = `${fmt(savedPos)} / ${fmt(durSec)}`;
+    }
+    // Подпись источника на экране волны; waveTrackTitle остаётся от трека
+    waveTrackArtist.textContent = "Продолжаем: " + (data.source || sessionSource());
+  } catch (e) {
+    console.warn("restoreSession failed:", e);
+  }
+}
+
 // --- Token persistence: localStorage (Android/desktop Chrome) ---
 function getToken() {
   try { return localStorage.getItem("ym_token") || ""; } catch (e) { return ""; }
@@ -480,6 +585,9 @@ if (oauthToken) {
     } catch (e) {}
   }
 
+  // Session memory: молчаливое восстановление очереди и позиции
+  restoreSession();
+
   // Re-validate the token in the background
   fetch(`/api/account?token=${encodeURIComponent(oauthToken)}`)
     .then((r) => r.json())
@@ -500,6 +608,8 @@ if (oauthToken) {
     });
 } else {
   updateAuthUI(false);
+  // Гость тоже восстанавливает сохранённую сессию (отдельный ключ)
+  restoreSession();
 }
 
 // Tab Navigation
@@ -563,6 +673,7 @@ function playTrack(track, seekTo = 0) {
   const isWaveTrack = !!radioSessionId;
   currentTrack = track;
   playedTrackIds.add(String(track.id));
+  saveSession(seekTo || 0);
 
   // Stream URL
   let streamUrl = `/api/stream?id=${encodeURIComponent(track.id)}&quality=${quality}`;
@@ -659,6 +770,7 @@ audio.addEventListener("pause", () => setPlayState(false));
 audio.addEventListener("loadedmetadata", () => showTime());
 audio.addEventListener("timeupdate", () => {
   accumulatePlayTime();
+  savePosition();
   if (audio.duration) {
     const percent = (audio.currentTime / audio.duration) * 100;
     miniProgressFill.style.width = percent + "%";
@@ -685,6 +797,13 @@ audio.addEventListener("ended", () => {
 // Controls
 function togglePlayPause() {
   if (!currentTrack) {
+    // Восстановленная сессия: первый тап play продолжает с сохранённой позиции
+    if (queue.length > 0 && queue[queueIndex]) {
+      const resumeFrom = savedPos;
+      savedPos = 0;
+      playTrack(queue[queueIndex], resumeFrom);
+      return;
+    }
     startWave();
     return;
   }
@@ -699,6 +818,7 @@ function playPrev() {
   if (queueIndex > 0) {
     queueIndex--;
     playTrack(queue[queueIndex]);
+    saveSession(0);
   } else if (audio.currentTime > 3) {
     // Restart current track like real players do
     audio.currentTime = 0;
@@ -712,6 +832,7 @@ async function playNext() {
   if (queueIndex < queue.length - 1) {
     queueIndex++;
     playTrack(queue[queueIndex]);
+    saveSession(0);
   } else {
     if (radioSessionId) {
       waveTrackTitle.textContent = "Загрузка новых треков...";
@@ -720,6 +841,7 @@ async function playNext() {
       if (queueIndex < queue.length - 1) {
         queueIndex++;
         playTrack(queue[queueIndex]);
+        saveSession(0);
       } else {
         startWave();
       }
