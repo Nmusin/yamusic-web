@@ -51,10 +51,8 @@ const waveNextPreview = document.getElementById("waveNextPreview");
 const waveNextTitle = document.getElementById("waveNextTitle");
 const wavePlayIcon = document.getElementById("wavePlayIcon");
 const btnWavePlay = document.getElementById("btnWavePlay");
-const btnWaveNext = document.getElementById("btnWaveNext");
 const btnWavePlayPrev = document.getElementById("btnWavePlayPrev");
 const btnDislike = document.getElementById("btnDislike");
-
 // UI Elements - MiniPlayer
 const miniPlayer = document.getElementById("miniPlayer");
 const miniCover = document.getElementById("miniCover");
@@ -64,9 +62,24 @@ const miniPlayBtn = document.getElementById("miniPlayBtn");
 const miniPlayIcon = document.getElementById("miniPlayIcon");
 const miniNextBtn = document.getElementById("miniNextBtn");
 const miniPrevBtn = document.getElementById("miniPrevBtn");
+const miniLikeBtn = document.getElementById("miniLikeBtn");
+const miniLikeIcon = document.getElementById("miniLikeIcon");
 const miniProgressBar = document.getElementById("miniProgressBar");
 const miniProgressFill = document.getElementById("miniProgressFill");
 const miniTime = document.getElementById("miniTime");
+
+// UI Elements - Playlists
+const playlistsScreen = document.getElementById("tab-playlists");
+const playlistsGrid = document.getElementById("playlistsGrid");
+const playlistsLoader = document.getElementById("playlistsLoader");
+const playlistsTitle = document.getElementById("playlistsTitle");
+const playlistsBackBtn = document.getElementById("playlistsBackBtn");
+const playlistsRefreshBtn = document.getElementById("playlistsRefreshBtn");
+const playlistTracks = document.getElementById("playlistTracks");
+
+// Like / dislike on Wave and player
+const btnLikeWave = document.getElementById("btnLikeWave");
+const waveLikeIcon = document.getElementById("waveLikeIcon");
 
 // UI Elements - Search
 const searchInput = document.getElementById("searchInput");
@@ -469,8 +482,9 @@ document.querySelectorAll(".nav-btn").forEach((btn) => {
   btn.addEventListener("click", () => {
     const tabId = btn.getAttribute("data-tab");
     switchTab(tabId);
-    // Load likes lazily on first open
+    // Load likes/playlists lazily on first open
     if (tabId === "tab-likes") loadLikes();
+    if (tabId === "tab-playlists") loadPlaylists();
   });
 });
 
@@ -568,6 +582,8 @@ function updateTrackUI(track) {
     const icon = activeItem.querySelector(".track-play-btn i");
     if (icon) icon.className = "fa-solid fa-pause";
   }
+
+  hookTrackUI(track);
 }
 
 function updateNextPreview() {
@@ -669,11 +685,12 @@ async function playNext() {
 btnWavePlay.addEventListener("click", togglePlayPause);
 waveBtn.addEventListener("click", togglePlayPause);
 miniPlayBtn.addEventListener("click", togglePlayPause);
-btnWaveNext.addEventListener("click", playNext);
-miniNextBtn.addEventListener("click", playNext);
 btnWavePlayPrev.addEventListener("click", playPrev);
 miniPrevBtn.addEventListener("click", playPrev);
-btnDislike.addEventListener("click", playNext);
+miniNextBtn.addEventListener("click", playNext);
+miniLikeBtn.addEventListener("click", toggleLikeCurrent);
+btnLikeWave.addEventListener("click", toggleLikeCurrent);
+btnDislike.addEventListener("click", dislikeAndSkip);
 
 miniProgressBar.addEventListener("click", (e) => {
   if (!audio.duration) return;
@@ -908,7 +925,7 @@ function showLikesEmpty(msg, icon) {
 
 async function loadLikes(force = false) {
   if (likesLoading) return;
-  if (likesLoaded && !force) return;
+  if (likesLoaded && !force && !likesDirty) return;
 
   if (!oauthToken) {
     showLikesEmpty("Войдите в аккаунт, чтобы увидеть лайкнутые треки");
@@ -944,6 +961,263 @@ async function loadLikes(force = false) {
 }
 
 likesRefreshBtn.addEventListener("click", () => loadLikes(true));
+
+// ===== Real Like / Dislike =====
+let likedIds = new Set();
+let likesDirty = false; // likes list needs refetch after manual changes
+
+function trackIdLiked(track) {
+  if (!track) return false;
+  return likedIds.has(String(track.id));
+}
+
+// Like button states via class on the wrapper buttons
+function updateHeartUI(liked) {
+  const iconClass = liked ? "fa-solid fa-heart" : "fa-regular fa-heart";
+  if (miniLikeIcon) {
+    miniLikeIcon.className = iconClass;
+    miniLikeBtn.classList.toggle("liked", liked);
+  }
+  if (waveLikeIcon) {
+    waveLikeIcon.className = iconClass;
+    btnLikeWave.classList.toggle("liked", liked);
+  }
+}
+
+async function refreshLikeState() {
+  if (!currentTrack) return;
+  if (likesDirty || !likedIds.size) {
+    // Pull liked ids in the background if not loaded yet / stale
+    if (oauthToken && (likesDirty || !likesLoaded)) {
+      try {
+        const res = await fetch(`/api/likes?token=${encodeURIComponent(oauthToken)}`);
+        const data = await res.json();
+        if (!data.guest) {
+          likesData = data.tracks || [];
+          likesLoaded = true;
+          likesDirty = false;
+          likedIds = new Set(likesData.map((t) => String(t.id)));
+        }
+      } catch (e) {}
+    }
+  }
+  updateHeartUI(trackIdLiked(currentTrack));
+}
+
+async function toggleLikeCurrent() {
+  if (!currentTrack) return;
+  if (!oauthToken) {
+    toast("Нужен вход в аккаунт для лайков");
+    openLoginModal();
+    return;
+  }
+  const target = currentTrack;
+  const wasLiked = trackIdLiked(target);
+  const remove = wasLiked ? 1 : 0;
+
+  if (remove) {
+    // The Yandex API (verified by probing 14 request shapes) does not support removing liked tracks.
+    toast("Трек уже в «Мне понравилось» — снятие недоступно через API");
+    updateHeartUI(true);
+    return;
+  }
+
+  if (wasLiked) { updateHeartUI(true); return; }
+
+  try {
+    const res = await fetch(`/api/like?token=${encodeURIComponent(oauthToken)}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: target.id, albumId: target.albumId, remove }),
+    });
+    const data = await res.json();
+    if (data.ok) {
+      likedIds.add(String(target.id));
+      updateHeartUI(true);
+      refreshLikesTabIfVisible();
+      toast("Добавлено в «Мне понравилось» ❤");
+    } else {
+      toast(data.error || "Не удалось добавить лайк");
+    }
+  } catch (e) {
+    toast("Ошибка сети: " + e.message);
+  }
+}
+
+function refreshLikesTabIfVisible() {
+  if (likesScreen.classList.contains("active") && likesLoaded) loadLikes(true);
+}
+
+async function dislikeAndSkip() {
+  if (radioSessionId && currentTrack) sendRotorFeedback("dislike");
+  toast("Дизлайк учтён, перематываем");
+  await playNext();
+}
+
+// sync hearts when a new track starts — hook is in updateTrackUI
+function hookTrackUI(track) {
+  updateHeartUI(trackIdLiked(track));
+  refreshLikeState();
+}
+
+// ===== Playlists =====
+let playlistsLoaded = false;
+let playlistsLoading = false;
+let playlistsData = [];
+let currentPlaylistKind = null;
+
+function showPlaylistsEmpty(msg) {
+  playlistsGrid.classList.remove("hidden");
+  playlistTracks.classList.add("hidden");
+  playlistsBackBtn.classList.add("hidden");
+  playlistsTitle.textContent = "Мои плейлисты";
+  playlistsGrid.innerHTML = `
+    <div class="likes-empty-state">
+      <i class="fa-solid fa-list"></i>
+      <p>${msg}</p>
+    </div>`;
+}
+
+async function loadPlaylists(force = false) {
+  if (playlistsLoading) return;
+  if (playlistsLoaded && !force) return;
+
+  if (!oauthToken) {
+    showPlaylistsEmpty("Войдите в аккаунт, чтобы увидеть плейлисты");
+    return;
+  }
+
+  playlistsLoading = true;
+  playlistsLoader.classList.remove("hidden");
+  try {
+    const res = await fetch(`/api/playlists?token=${encodeURIComponent(oauthToken)}`);
+    const data = await res.json();
+    if (data.guest) {
+      showPlaylistsEmpty("Токен недействителен — войдите заново");
+    } else {
+      playlistsData = data.playlists || [];
+      playlistsLoaded = true;
+      currentPlaylistKind = null;
+      renderPlaylistsGrid();
+    }
+  } catch (e) {
+    showPlaylistsEmpty("Ошибка загрузки: " + e.message);
+  } finally {
+    playlistsLoading = false;
+    playlistsLoader.classList.add("hidden");
+  }
+}
+
+function renderPlaylistsGrid() {
+  playlistsGrid.classList.remove("hidden");
+  playlistTracks.classList.add("hidden");
+  playlistsBackBtn.classList.add("hidden");
+  playlistsTitle.textContent = "Мои плейлисты";
+  playlistsGrid.innerHTML = "";
+
+  if (playlistsData.length === 0) {
+    playlistsGrid.innerHTML =
+      '<div class="likes-empty-state"><i class="fa-solid fa-list"></i><p>Плейлисты не найдены</p></div>';
+    return;
+  }
+
+  playlistsData.forEach((pl) => {
+    const card = document.createElement("div");
+    card.className = "playlist-card";
+
+    const cover = document.createElement("img");
+    cover.src = pl.coverUri || FALLBACK_COVER;
+    cover.alt = pl.title;
+    cover.onerror = () => { cover.src = FALLBACK_COVER; };
+
+    const meta = document.createElement("div");
+    meta.className = "playlist-meta";
+    const t = document.createElement("div");
+    t.className = "playlist-name";
+    t.textContent = pl.title;
+    const c = document.createElement("div");
+    c.className = "playlist-count";
+    const n = pl.trackCount;
+    c.textContent = `${n} ${n % 10 === 1 && n % 100 !== 11 ? "трек" : (n % 10 >= 2 && n % 10 <= 4 && (n % 100 < 10 || n % 100 >= 20) ? "трека" : "треков")}`;
+    meta.append(t, c);
+    card.append(cover, meta);
+
+    card.addEventListener("click", () => openPlaylist(pl));
+    playlistsGrid.appendChild(card);
+  });
+}
+
+async function openPlaylist(pl) {
+  playlistsLoader.classList.remove("hidden");
+  playlistsGrid.classList.add("hidden");
+  currentPlaylistKind = pl.kind;
+  try {
+    const params = new URLSearchParams({ kind: pl.kind, token: oauthToken, uid: pl.uid });
+    const res = await fetch(`/api/playlist-tracks?${params.toString()}`);
+    const data = await res.json();
+    playlistsTitle.textContent = data.title || pl.title;
+    playlistTracks.classList.remove("hidden");
+    playlistsBackBtn.classList.remove("hidden");
+    renderTrackList(data.tracks || [], playlistTracks, null, "");
+    if (!data.tracks || data.tracks.length === 0) {
+      playlistTracks.innerHTML =
+        '<div class="likes-empty-state"><i class="fa-solid fa-list"></i><p>Плейлист пуст</p></div>';
+    }
+    // Mark the playing track if it is in this playlist
+    if (currentTrack) {
+      const it = playlistTracks.querySelector(`.track-item[data-track-id="${CSS.escape(String(currentTrack.id))}"]`);
+      if (it) it.classList.add("playing");
+    }
+  } catch (e) {
+    toast("Ошибка плейлиста: " + e.message);
+    renderPlaylistsGrid();
+  } finally {
+    playlistsLoader.classList.add("hidden");
+  }
+}
+
+playlistsBackBtn.addEventListener("click", () => renderPlaylistsGrid());
+playlistsRefreshBtn.addEventListener("click", () => loadPlaylists(true));
+
+// ===== Sleep Timer =====
+let sleepTimer = null;
+let sleepTimerActive = false;
+
+function updateSleepStatus() {
+  const el = document.getElementById("sleepStatus");
+  if (!el) return;
+  if (sleepTimerActive && sleepTimer) {
+    const left = Math.max(0, Math.ceil((sleepTimer.expiresAt - Date.now()) / 60000));
+    el.textContent = `Музыка остановится через ~${left} мин`;
+    el.classList.remove("hidden");
+  } else {
+    el.classList.add("hidden");
+  }
+}
+
+document.querySelectorAll(".sleep-btn").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    const minutes = parseInt(btn.getAttribute("data-sleep"), 10);
+    if (sleepTimer) { clearTimeout(sleepTimer.t); sleepTimer = null; }
+    sleepTimerActive = false;
+    if (!minutes) {
+      updateSleepStatus();
+      toast("Таймер сна отключен");
+      return;
+    }
+    const expiry = Date.now() + minutes * 60000;
+    sleepTimer = { expiresAt: expiry, t: setTimeout(() => {
+      sleepTimerActive = false;
+      audio.pause();
+      updateSleepStatus();
+      toast("Таймер сна: музыка остановлена 🌙");
+    }, minutes * 60000) };
+    sleepTimerActive = true;
+    updateSleepStatus();
+    toast(`Сон через ${minutes} мин`);
+  });
+});
+setInterval(updateSleepStatus, 60000);
 
 // --- Quality Test ---
 const qualityTestBtn = document.getElementById("qualityTestBtn");

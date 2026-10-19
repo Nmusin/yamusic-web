@@ -105,16 +105,47 @@
             <button class="btn-circle btn-secondary" id="btnWavePlayPrev" title="Предыдущий">
               <i class="fa-solid fa-backward-step"></i>
             </button>
-            <button class="btn-circle btn-secondary" id="btnDislike" title="Не нравится / Пропустить">
-              <i class="fa-solid fa-thumbs-down"></i>
+            <button class="btn-circle btn-secondary" id="btnLikeWave" title="Лайкнуть">
+              <i class="fa-regular fa-heart" id="waveLikeIcon"></i>
             </button>
             <button class="btn-circle btn-primary" id="btnWavePlay" title="Играть / Пауза">
               <i class="fa-solid fa-play" id="wavePlayIcon"></i>
             </button>
-            <button class="btn-circle btn-secondary" id="btnWaveNext" title="Следующий новый трек">
-              <i class="fa-solid fa-shuffle"></i>
+            <button class="btn-circle btn-secondary" id="btnDislike" title="Дизлайк + Пропустить">
+              <i class="fa-solid fa-thumbs-down"></i>
             </button>
           </div>
+        </div>
+      </section>
+
+      <!-- Section: Playlists -->
+      <section id="tab-playlists" class="tab-content">
+        <div class="playlists-screen">
+          <div class="likes-header-row">
+            <button id="playlistsBackBtn" class="likes-refresh-btn hidden" title="Назад к плейлистам">
+              <i class="fa-solid fa-angle-left"></i>
+            </button>
+            <h3 id="playlistsTitle">Мои плейлисты</h3>
+            <button id="playlistsRefreshBtn" class="likes-refresh-btn" title="Обновить">
+              <i class="fa-solid fa-rotate-right"></i>
+            </button>
+          </div>
+
+          <div id="playlistsLoader" class="loader hidden">
+            <i class="fa-solid fa-circle-notch fa-spin"></i>
+            <p>Загружаем плейлисты...</p>
+          </div>
+
+          <!-- List of playlists (grid) -->
+          <div id="playlistsGrid" class="playlists-grid">
+            <div class="likes-empty-state">
+              <i class="fa-solid fa-list"></i>
+              <p>Войдите в аккаунт, чтобы увидеть плейлисты</p>
+            </div>
+          </div>
+
+          <!-- Tracks of one playlist -->
+          <div id="playlistTracks" class="track-list hidden"></div>
         </div>
       </section>
 
@@ -177,6 +208,19 @@
 
           <!-- Audio Quality -->
           <div class="card">
+            <h3>Таймер сна</h3>
+            <p class="muted-note">Остановит музыку через выбранное время</p>
+            <div class="quality-options sleep-row">
+              <button class="sleep-btn" data-sleep="15">15 мин</button>
+              <button class="sleep-btn" data-sleep="30">30 мин</button>
+              <button class="sleep-btn" data-sleep="60">1 час</button>
+              <button class="sleep-btn sleep-off" data-sleep="0">Отключить</button>
+            </div>
+            <div id="sleepStatus" class="muted-note hidden"></div>
+          </div>
+
+          <!-- Audio Quality -->
+          <div class="card">
             <h3>Качество аудио</h3>
             <div class="quality-options">
               <label class="radio-label">
@@ -213,6 +257,9 @@
           <div class="mini-artist" id="miniArtist">—</div>
         </div>
         <div class="mini-actions">
+          <button id="miniLikeBtn" class="btn-icon mini-like" title="Лайк / Убрать лайк">
+            <i class="fa-regular fa-heart" id="miniLikeIcon"></i>
+          </button>
           <button id="miniPrevBtn" class="btn-icon" title="Предыдущий">
             <i class="fa-solid fa-backward-step"></i>
           </button>
@@ -236,6 +283,10 @@
       <button class="nav-btn" data-tab="tab-search">
         <i class="fa-solid fa-magnifying-glass"></i>
         <span>Поиск</span>
+      </button>
+      <button class="nav-btn" data-tab="tab-playlists">
+        <i class="fa-solid fa-list"></i>
+        <span>Плейлисты</span>
       </button>
       <button class="nav-btn" data-tab="tab-likes">
         <i class="fa-solid fa-heart"></i>

@@ -4,11 +4,44 @@ const crypto = require("crypto");
 const fs = require("fs");
 const path = require("path");
 const url = require("url");
+const stream = require("stream");
 
 const PORT = process.env.PORT || 3000;
 const SECRET_KEY = "kzqU4XhfCaY6B6JTHODeq5";
 const CLIENT_HEADER = "YandexMusicDesktopAppWindows/5.46.2";
 let lastToken = null; // last token seen in requests (for quality tests)
+
+// --- .env loader (KEY=VALUE lines; YM_TOKEN used as default account token) ---
+const ENV_FILE = path.join(__dirname, ".env");
+try {
+  if (fs.existsSync(ENV_FILE)) {
+    for (const line of fs.readFileSync(ENV_FILE, "utf8").split("\n")) {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith("#")) continue;
+      const m = /^\s*([A-Z0-9_]+)\s*=\s*(.+?)\s*$/.exec(line);
+      if (m && process.env[m[1]] === undefined) process.env[m[1]] = m[2];
+    }
+  }
+} catch (e) {}
+
+let DEFAULT_TOKEN = process.env.YM_TOKEN || "";
+function updateDefaultToken() {
+  // re-read .env so a freshly saved token works without restart
+  try {
+    if (fs.existsSync(ENV_FILE)) {
+      for (const line of fs.readFileSync(ENV_FILE, "utf8").split("\n")) {
+        const trimmed = line.trim();
+        if (!trimmed || trimmed.startsWith("#")) continue;
+        const m = /^\s*([A-Z0-9_]+)\s*=\s*(.+?)\s*$/.exec(line);
+        if (m) process.env[m[1]] = m[2];
+      }
+    }
+  } catch (e) {}
+  return process.env.YM_TOKEN || "";
+}
+function resolveToken(qt) {
+  return qt || lastToken || DEFAULT_TOKEN || null;
+}
 
 // Official Yandex Music OAuth credentials (from MarshalX/yandex-music-token)
 const OAUTH_CLIENT_ID = "23cabbbdc6cd418abb4b39c32c41195d";
@@ -112,6 +145,7 @@ async function getAccountInfo(token) {
     const uid = account.uid || r.uid;
     if (resp.status === 200 && uid) {
       const avatarRaw = r.avatarUrl || account.avatarUrl;
+      const hasPlus = !!(r.plus?.has_plus || account.plus?.has_plus);
       return {
         loggedIn: true,
         user: {
@@ -119,7 +153,7 @@ async function getAccountInfo(token) {
           login: account.login || r.login,
           fullName: account.fullName || account.displayName || account.login || r.fullName || r.login,
           avatarUrl: avatarRaw ? `https://avatars.yandex.net/get-yapic/${avatarRaw}/islands-200` : null,
-          hasPlus: true, // Spoofed Plus
+          hasPlus, // real subscription status
         },
       };
     }
@@ -261,9 +295,40 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  // --- API: Save current/last token into .env (survives server restarts) ---
+  if (pathname === "/api/save-token") {
+    const token = resolveToken(null);
+    if (!token) {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ saved: false, error: "No token in memory — open the app first" }));
+      return;
+    }
+    try {
+      let envContent = "";
+      if (fs.existsSync(ENV_FILE)) {
+        envContent = fs.readFileSync(ENV_FILE, "utf8")
+          .split("\n")
+          .filter((l) => !/^\s*YM_TOKEN\s*=/.test(l))
+          .join("\n");
+      }
+      if (envContent && !envContent.endsWith("\n")) envContent += "\n";
+      envContent += `YM_TOKEN=${token}\n`;
+      fs.writeFileSync(ENV_FILE, envContent);
+      process.env.YM_TOKEN = updateDefaultToken(); // pick it up immediately without restart
+      DEFAULT_TOKEN = process.env.YM_TOKEN;
+      console.log("[ENV] Token saved to .env");
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ saved: true }));
+    } catch (e) {
+      res.writeHead(500, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ saved: false, error: e.message }));
+    }
+    return;
+  }
+
   // --- API: Account Status / Login Verification ---
   if (pathname === "/api/account") {
-    const token = query.token || req.headers["authorization"] || null;
+    const token = resolveToken(query.token || req.headers["authorization"]);
     if (!token) {
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ loggedIn: false }));
@@ -289,7 +354,7 @@ const server = http.createServer(async (req, res) => {
   // --- API: Search ---
   if (pathname === "/api/search") {
     const text = query.q || "";
-    const token = query.token || null;
+    const token = resolveToken(query.token);
     if (!text.trim()) {
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ tracks: [] }));
@@ -305,6 +370,7 @@ const server = http.createServer(async (req, res) => {
         title: t.title,
         artists: t.artists ? t.artists.map((a) => a.name).join(", ") : "Unknown",
         album: t.albums && t.albums[0] ? t.albums[0].title : null,
+        albumId: t.albums && t.albums[0] ? String(t.albums[0].id) : null,
         coverUri: t.coverUri
           ? "https://" + t.coverUri.replace("%%", "200x200")
           : t.ogImage
@@ -323,7 +389,7 @@ const server = http.createServer(async (req, res) => {
 
   // --- API: User Liked Tracks ---
   if (pathname === "/api/likes") {
-    const token = query.token || null;
+    const token = resolveToken(query.token);
     if (!token) {
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ tracks: [], guest: true }));
@@ -380,6 +446,7 @@ const server = http.createServer(async (req, res) => {
             : t.ogImage
             ? "https://" + t.ogImage.replace("%%", "200x200")
             : null,
+          albumId: t.albums && t.albums[0] ? String(t.albums[0].id) : null,
           durationMs: t.durationMs || 0,
         }));
 
@@ -394,7 +461,7 @@ const server = http.createServer(async (req, res) => {
 
   // --- API: My Wave (Моя Волна) with continuous session progression ---
   if (pathname === "/api/wave") {
-    const token = query.token || null;
+    const token = resolveToken(query.token);
     const sessionId = query.sessionId || null;
 
     let targetUrl;
@@ -415,9 +482,14 @@ const server = http.createServer(async (req, res) => {
       const radioSessionId = result.data?.radioSessionId || sessionId;
       const sequence = result.data?.sequence || result.data?.result?.sequence || [];
 
-      // Filter out promo ads ("Промокод Upgrade")
+      // Filter out promo ads: check by title fragment and availability
       const cleanTracks = sequence
-        .filter((item) => item.track && item.track.title !== "Промокод Upgrade")
+        .filter((item) => {
+          if (!item.track) return false;
+          if (item.track.available === false) return false;
+          if (/промокод/i.test(item.track.title || "")) return false;
+          return true;
+        })
         .map((item) => {
           const t = item.track;
           return {
@@ -445,7 +517,7 @@ const server = http.createServer(async (req, res) => {
 
   // --- API: Rotor Feedback (skip / trackStarted / radioStarted) — keeps the Wave flowing ---
   if (pathname === "/api/rotor/feedback" && req.method === "POST") {
-    const token = query.token || null;
+    const token = resolveToken(query.token);
     if (!token) {
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ ok: false, guest: true }));
@@ -494,9 +566,70 @@ function httpsHead(targetUrl) {
   });
 }
 
+// --- Get-file-info with in-memory cache (signed URLs live for ~20 min) ---
+const downloadInfoCache = new Map(); // `${quality}:${trackId}` -> {d, ts}
+const FILE_INFO_TTL_MS = 20 * 60 * 1000;
+
+async function fetchDownloadInfo(token, trackId, quality) {
+  const cacheKey = `${quality}:${trackId}`;
+  const hit = downloadInfoCache.get(cacheKey);
+  if (hit && Date.now() - hit.ts < FILE_INFO_TTL_MS) {
+    return { downloadInfo: hit.d, cached: true };
+  }
+
+  const ts = Math.floor(Date.now() / 1000);
+  const codecs = ["flac", "aac", "he-aac", "mp3", "flac-mp4", "aac-mp4", "he-aac-mp4"];
+  const transports = "encraw";
+  const sign = generateSign(trackId, quality, codecs, transports, ts);
+  const infoUrl = `https://api.music.yandex.net/get-file-info?ts=${ts}&trackId=${trackId}&quality=${quality}&codecs=${encodeURIComponent(codecs.join(","))}&transports=${transports}&sign=${encodeURIComponent(sign)}`;
+  const info = await yandexRequest(infoUrl, token);
+  const d = info.data?.result?.downloadInfo || info.data?.downloadInfo;
+  if (d && d.urls && d.urls[0]) {
+    downloadInfoCache.set(cacheKey, { d, ts: Date.now() });
+    if (downloadInfoCache.size > 200) {
+      const firstKey = downloadInfoCache.keys().next().value;
+      downloadInfoCache.delete(firstKey);
+    }
+  }
+  return { downloadInfo: d, cached: false };
+}
+
+// AES-128-CTR decipher whose keystream starts at a byte offset (for HTTP Range seeks).
+// Returns a single Transform when no offset, or {transform, readable} pair otherwise.
+function ctrDecipherAt(keyBuffer, byteOffset) {
+  if (!byteOffset || byteOffset < 0) byteOffset = 0;
+  const iv = Buffer.alloc(16, 0);
+  const blockIndex = Math.floor(byteOffset / 16);
+  let v = blockIndex;
+  for (let i = 15; i >= 0 && v > 0; i--) {
+    iv[i] = v % 256;
+    v = Math.floor(v / 256);
+  }
+  const decipher = crypto.createDecipheriv("aes-128-ctr", keyBuffer, iv);
+
+  const offsetInBlock = byteOffset % 16;
+  if (!offsetInBlock) return decipher; // plain Transform
+
+  // Skip the first `offsetInBlock` plaintext bytes (only that many from the initial keystream block)
+  let skipBytes = offsetInBlock;
+  const skipper = new stream.Transform({
+    transform(chunk, enc, cb) {
+      if (skipBytes > 0) {
+        const cut = Math.min(skipBytes, chunk.length);
+        chunk = chunk.slice(cut);
+        skipBytes -= cut;
+      }
+      if (chunk.length) this.push(chunk);
+      cb();
+    },
+  });
+  decipher.pipe(skipper);
+  return { transform: decipher, readable: skipper };
+}
+
 // --- API: Quality Test — probes get-file-info for every quality and measures real bitrates ---
 if (pathname === "/api/quality-test") {
-  const token = query.token || lastToken || null;
+  const token = resolveToken(query.token);
   if (!token) {
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ error: "Нет токена — откройте приложение, оно передаёт токен автоматически" }));
@@ -568,11 +701,208 @@ if (pathname === "/api/quality-test") {
   return;
 }
 
+
+// --- API: Like / Unlike track (real likes, not just skip) ---
+if (pathname === "/api/like" && req.method === "POST") {
+  const token = resolveToken(query.token);
+  if (!token) {
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ ok: false, guest: true }));
+    return;
+  }
+  const body = await parseBody(req);
+  const trackId = String(body.id || "");
+  if (!trackId) {
+    res.writeHead(400, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ ok: false, error: "Missing id" }));
+    return;
+  }
+  try {
+    const accInfo = await getAccountInfo(token);
+    if (!accInfo.loggedIn) {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: false, error: "Token invalid" }));
+      return;
+    }
+    // Working API shape (confirmed by probing): add-multiple supports add.
+    // NOTE: actual "unlike" is not supported by the API for this token scope —
+    // 14 request shapes were probed (dash/camel params, remove=1/true, form/json
+    // body, DELETE, if-revision). Every call bumps revision but never removes
+    // the track from the library, so we reject unlike upfront and keep UI honest.
+    if (body.remove) {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({
+        ok: false,
+        unsupported: true,
+        error: "Снятие лайка недоступно через API (подтверждено тестами)",
+      }));
+      return;
+    }
+    const addRemove = await yandexRequest(
+      `https://api.music.yandex.net/users/${accInfo.user.uid}/likes/tracks/add-multiple` +
+      `?track-ids=${encodeURIComponent(trackId)}` +
+      (body.albumId ? `&album-ids=${encodeURIComponent(String(body.albumId))}` : ""),
+      token, "POST", {}
+    );
+    console.log(
+      `[LIKE] track=${trackId} album=${body.albumId || "-"} remove=0 -> status=${addRemove.status}`,
+      JSON.stringify(addRemove.data).slice(0, 200)
+    );
+    const revision = addRemove.data?.revision ?? addRemove.data?.result?.revision ?? null;
+    const ok = addRemove.status === 200;
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ ok, liked: !body.remove, status: addRemove.status, revision }));
+  } catch (e) {
+    res.writeHead(500, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ ok: false, error: e.message }));
+  }
+  return;
+}
+
+// --- API: Which of the passed ids are liked (batch heart states) ---
+if (pathname === "/api/like-status") {
+  const token = resolveToken(query.token);
+  const ids = String(query.ids || "").split(",").filter(Boolean);
+  if (!token || ids.length === 0) {
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ likedIds: [] }));
+    return;
+  }
+  try {
+    const accInfo = await getAccountInfo(token);
+    if (!accInfo.loggedIn) {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ likedIds: [] }));
+      return;
+    }
+    const likes = await yandexRequest(
+      `https://api.music.yandex.net/users/${accInfo.user.uid}/likes/tracks`, token
+    );
+    const rl = likes.data?.result ?? likes.data ?? {};
+    const lib = rl?.library?.tracks || rl?.tracks || [];
+    const set = new Set(lib.map((t) => String(t.id)));
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ likedIds: ids.filter((i) => set.has(String(i))) }));
+  } catch (e) {
+    res.writeHead(500, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: e.message }));
+  }
+  return;
+}
+
+// --- API: User playlists list ---
+if (pathname === "/api/playlists") {
+  const token = resolveToken(query.token);
+  if (!token) {
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ playlists: [], guest: true }));
+    return;
+  }
+  try {
+    const accInfo = await getAccountInfo(token);
+    if (!accInfo.loggedIn) {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ playlists: [], guest: true }));
+      return;
+    }
+    const resp = await yandexRequest(
+      `https://api.music.yandex.net/users/${accInfo.user.uid}/playlists`,
+      token
+    );
+    const lists = Array.isArray(resp.data)
+      ? resp.data
+      : resp.data?.result || [];
+    const clean = lists
+      .filter((p) => p.kind != null)
+      .map((p) => ({
+        kind: p.kind,
+        uid: p.uid || accInfo.user.uid,
+        title: p.title || "Без названия",
+        trackCount: p.trackCount || (p.tracks ? p.tracks.length : 0),
+        coverUri: p.coverUri
+          ? "https://" + p.coverUri.replace("%%", "200x200")
+          : p.ogImage
+          ? "https://" + p.ogImage.replace("%%", "200x200")
+          : null,
+        revised: p.revised || null,
+      }));
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ playlists: clean }));
+  } catch (e) {
+    res.writeHead(500, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: e.message }));
+  }
+  return;
+}
+
+// --- API: Tracks of one playlist ---
+if (pathname === "/api/playlist-tracks") {
+  const token = resolveToken(query.token);
+  const kind = query.kind;
+  const ownerUid = query.uid || null;
+  if (!token || !kind) {
+    res.writeHead(400, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: "Missing kind or token" }));
+    return;
+  }
+  try {
+    const accInfo = ownerUid ? { user: { uid: ownerUid } } : await getAccountInfo(token);
+    if (!accInfo.user?.uid) {
+      res.writeHead(401, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Token invalid" }));
+      return;
+    }
+    const resp = await yandexRequest(
+      `https://api.music.yandex.net/users/${accInfo.user.uid}/playlists/${encodeURIComponent(String(kind))}`,
+      token
+    );
+    const playlist = resp.data?.result || {};
+    // Playlist track briefs: {id, albumId} — resolve full info in one batch
+    const briefs = playlist.tracks || [];
+    const ids = briefs.map((b) => String(b.id)).filter(Boolean);
+
+    let byId = new Map();
+    if (ids.length) {
+      const tr = await yandexRequest(
+        `https://api.music.yandex.net/tracks?track-ids=${encodeURIComponent(ids.join(","))}`,
+        token
+      );
+      const items = Array.isArray(tr.data) ? tr.data : tr.data?.result || [];
+      byId = new Map(items.map((t) => [String(t.id), t]));
+    }
+
+    const title = playlist.title || "Плейлист";
+    const clean = ids
+      .map((id) => byId.get(id))
+      .filter(Boolean)
+      .map((t) => ({
+        id: String(t.id),
+        title: t.title,
+        artists: t.artists ? t.artists.map((a) => a.name).join(", ") : "Unknown",
+        album: t.albums && t.albums[0] ? t.albums[0].title : null,
+        albumId: t.albums && t.albums[0] ? String(t.albums[0].id) : null,
+        coverUri: t.coverUri
+          ? "https://" + t.coverUri.replace("%%", "200x200")
+          : t.ogImage
+          ? "https://" + t.ogImage.replace("%%", "200x200")
+          : null,
+        albumId: t.albums && t.albums[0] ? String(t.albums[0].id) : null,
+        durationMs: t.durationMs || 0,
+      }));
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ title, coverUri: playlist.coverUri ? "https://" + playlist.coverUri.replace("%%", "200x200") : null, tracks: clean }));
+  } catch (e) {
+    res.writeHead(500, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: e.message }));
+  }
+  return;
+}
+
   // --- API: Audio Stream (with on-the-fly AES-CTR decryption) ---
   if (pathname === "/api/stream") {
     const trackId = query.id;
     const quality = query.quality || "nq"; // lossless, nq, lq
-    const token = query.token || null;
+    const token = resolveToken(query.token);
 
     if (!trackId) {
       res.writeHead(400, { "Content-Type": "text/plain" });
@@ -581,18 +911,13 @@ if (pathname === "/api/quality-test") {
     }
 
     try {
-      const ts = Math.floor(Date.now() / 1000);
-      const codecs = ["flac", "aac", "he-aac", "mp3", "flac-mp4", "aac-mp4", "he-aac-mp4"];
-      const transports = "encraw";
-      const sign = generateSign(trackId, quality, codecs, transports, ts);
-
-      const infoUrl = `https://api.music.yandex.net/get-file-info?ts=${ts}&trackId=${trackId}&quality=${quality}&codecs=${encodeURIComponent(codecs.join(","))}&transports=${transports}&sign=${encodeURIComponent(sign)}`;
-      const fileInfoResp = await yandexRequest(infoUrl, token);
-      const downloadInfo = fileInfoResp.data?.result?.downloadInfo || fileInfoResp.data?.downloadInfo;
+      const { downloadInfo, cached } = await fetchDownloadInfo(token, trackId, quality);
 
       if (!downloadInfo || !downloadInfo.urls || !downloadInfo.urls[0]) {
+        // rotate storage: clear cached bad entry
+        downloadInfoCache.delete(`${quality}:${trackId}`);
         res.writeHead(404, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ error: "Download info not found", details: fileInfoResp.data }));
+        res.end(JSON.stringify({ error: "Download info not found" }));
         return;
       }
 
@@ -601,36 +926,67 @@ if (pathname === "/api/quality-test") {
       const codec = downloadInfo.codec || "mp3";
       const contentType = codec.includes("flac") ? "audio/flac" : "audio/mpeg";
 
+      // HTTP Range (seek support). CTR is a byte-aligned stream, so plain-text offset == encrypted offset.
+      let rangeStart = 0;
+      const rangeHeader = req.headers.range || "";
+      const m = /^bytes=(\d+)-/.exec(rangeHeader);
+      if (m) rangeStart = parseInt(m[1], 10) || 0;
+
       console.log(
-        `[STREAM] track=${trackId} q=${quality} codec=${codec} fileSize=${downloadInfo.fileSize || "?"} ` +
-        `enc=${downloadInfo.encryption || "?"} preview=${streamUrl.includes("preview") ? "YES" : "no"} ` +
-        `url=${streamUrl.slice(0, 90)}...`
+        `[STREAM] track=${trackId} q=${quality} codec=${codec} ${cached ? "CACHED" : "fetched"} ` +
+        `range=${rangeStart ? rangeStart + "-" : "full"}`
       );
 
-      https.get(streamUrl, (audioRes) => {
-        if (audioRes.statusCode !== 200) {
-          res.writeHead(audioRes.statusCode, { "Content-Type": "text/plain" });
-          res.end("Error fetching audio from storage");
-          return;
-        }
-
-        // Set headers for audio playback
-        res.writeHead(200, {
-          "Content-Type": contentType,
-          "Accept-Ranges": "none",
-          "Cache-Control": "public, max-age=3600",
-        });
-
-        // Decrypt on-the-fly using AES-128-CTR with 16-zero IV
-        const keyBuffer = Buffer.from(aesKey, "hex");
-        const ivBuffer = Buffer.alloc(16, 0);
-        const decipher = crypto.createDecipheriv("aes-128-ctr", keyBuffer, ivBuffer);
-
-        audioRes.pipe(decipher).pipe(res);
-      }).on("error", (err) => {
-        if (!res.headersSent) res.writeHead(502);
-        res.end("Stream error: " + err.message);
+      const storageReq = (withRange) => new Promise((resolve) => {
+        const headers = {};
+        if (withRange && rangeStart) headers["Range"] = `bytes=${rangeStart}-`;
+        const r = https.get(streamUrl, { headers }, (upRes) => resolve(upRes));
+        r.on("error", () => resolve(null));
       });
+
+      let audioRes = await storageReq(!!rangeStart);
+
+      // Storage may reject Range on signed URLs — fall back to a full fetch once
+      if (!audioRes || (audioRes.statusCode >= 400 && rangeStart)) {
+        if (audioRes) audioRes.resume();
+        audioRes = await storageReq(false);
+      }
+
+      if (!audioRes) {
+        res.writeHead(502, { "Content-Type": "text/plain" });
+        res.end("Stream error: storage unreachable");
+        return;
+      }
+
+      if (audioRes.statusCode >= 400) {
+        downloadInfoCache.delete(`${quality}:${trackId}`);
+        res.writeHead(502, { "Content-Type": "text/plain" });
+        res.end(`Stream error: storage status ${audioRes.statusCode}`);
+        return;
+      }
+
+      // Response status mirrors the storage one (200 full / 206 partial)
+      const respStatus = rangeStart && audioRes.statusCode === 206 ? 206 : 200;
+      const respHeaders = {
+        "Content-Type": contentType,
+        "Accept-Ranges": "bytes",
+        "Cache-Control": "public, max-age=3600",
+      };
+      if (audioRes.headers["content-length"]) respHeaders["Content-Length"] = audioRes.headers["content-length"];
+      if (audioRes.headers["content-range"]) respHeaders["Content-Range"] = audioRes.headers["content-range"];
+
+      res.writeHead(respStatus, respHeaders);
+
+      // Decrypt on-the-fly using AES-128-CTR (IV = counter advanced to range start)
+      const keyBuffer = Buffer.from(aesKey, "hex");
+      // If storage ignored Range and replied 200 with the whole file — start keystream at 0
+      const decStart = rangeStart && audioRes.statusCode === 206 ? rangeStart : 0;
+      const dec = ctrDecipherAt(keyBuffer, decStart);
+      if (dec instanceof stream.Transform) {
+        audioRes.pipe(dec).pipe(res);
+      } else {
+        audioRes.pipe(dec.transform).pipe(res);
+      }
     } catch (e) {
       res.writeHead(500, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ error: e.message }));
