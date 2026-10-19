@@ -832,6 +832,7 @@ body {
 .mini-details {
   flex: 1;
   min-width: 0;
+  cursor: pointer;
 }
 
 .mini-title {
@@ -1240,6 +1241,188 @@ body {
 .loader p {
   font-size: 14px;
   color: #888;
+}
+
+/* ===== Track Actions Bottom Sheet (AMOLED: #000, radius 24 top) ===== */
+.track-sheet-wrap {
+  position: fixed;
+  inset: 0;
+  z-index: 110;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+}
+
+.sheet-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.75);
+  backdrop-filter: blur(6px);
+}
+
+.track-sheet {
+  position: relative;
+  width: 100%;
+  max-width: 560px;
+  background: #000;
+  border-radius: 24px 24px 0 0;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-bottom: none;
+  box-shadow: 0 -12px 36px rgba(0, 0, 0, 0.9);
+  padding: 10px 20px calc(20px + env(safe-area-inset-bottom, 0px));
+  animation: sheetUp 0.3s cubic-bezier(0.2, 0.9, 0.3, 1);
+}
+
+@keyframes sheetUp {
+  from { transform: translateY(100%); }
+  to { transform: translateY(0); }
+}
+
+.sheet-grabber {
+  width: 36px;
+  height: 4px;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.25);
+  margin: 0 auto 14px;
+}
+
+.sheet-close {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.06);
+  border: none;
+  color: #999;
+  font-size: 15px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.sheet-close:active {
+  background: rgba(255, 255, 255, 0.14);
+}
+
+.sheet-header {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 18px;
+  padding-right: 34px;
+}
+
+.sheet-cover {
+  width: 64px;
+  height: 64px;
+  border-radius: 12px;
+  object-fit: cover;
+  background-color: #2a2a2a;
+  flex-shrink: 0;
+}
+
+.sheet-head-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.sheet-title {
+  font-size: 17px;
+  font-weight: 700;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sheet-sub {
+  font-size: 12px;
+  color: #888;
+  margin-top: 3px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sheet-like-btn {
+  background: transparent;
+  border: none;
+  color: #fff;
+  font-size: 22px;
+  padding: 8px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.sheet-like-btn.liked {
+  color: #ffcc00;
+}
+
+.sheet-actions {
+  display: flex;
+  gap: 10px;
+}
+
+.sheet-action-btn {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border: none;
+  border-radius: 14px;
+  min-height: 44px;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: transform 0.15s;
+}
+
+.sheet-action-btn:active {
+  transform: scale(0.97);
+}
+
+.sheet-btn-secondary {
+  background: rgba(255, 255, 255, 0.08);
+  color: #fff;
+}
+
+.sheet-btn-primary {
+  background: #ffcc00;
+  color: #000;
+}
+
+/* ===== Queue end plaque on Wave tab ===== */
+.wave-ended {
+  margin-top: 18px;
+  text-align: center;
+}
+
+.wave-ended-text {
+  color: #999;
+  font-size: 14px;
+  margin-bottom: 12px;
+}
+
+.wave-ended-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: #ffcc00;
+  color: #000;
+  border: none;
+  border-radius: 22px;
+  font-size: 14px;
+  font-weight: 700;
+  padding: 11px 22px;
+  cursor: pointer;
+  transition: transform 0.15s;
+}
+
+.wave-ended-btn:active {
+  transform: scale(0.96);
 }
 
 .hidden {

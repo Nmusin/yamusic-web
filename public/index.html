@@ -113,6 +113,13 @@
               <i class="fa-solid fa-thumbs-down"></i>
             </button>
           </div>
+
+          <div id="waveEnded" class="wave-ended hidden">
+            <p class="wave-ended-text">Очередь закончилась</p>
+            <button id="waveEndedBtn" class="wave-ended-btn">
+              <i class="fa-solid fa-water"></i> Включить Мою Волну
+            </button>
+          </div>
         </div>
       </section>
 
@@ -275,7 +282,7 @@
       </div>
       <div class="mini-player-body">
         <img id="miniCover" src="" class="mini-cover" alt="Cover">
-        <div class="mini-details">
+        <div class="mini-details" id="miniDetails">
           <div class="mini-title" id="miniTitle">Нет трека</div>
           <div class="mini-artist" id="miniArtist">—</div>
         </div>
@@ -324,6 +331,35 @@
         <span>Профиль</span>
       </button>
     </nav>
+
+    <!-- Track Actions Bottom Sheet -->
+    <div id="trackSheet" class="track-sheet-wrap hidden">
+      <div class="sheet-backdrop" id="sheetBackdrop"></div>
+      <div class="track-sheet" role="dialog" aria-label="Действия с треком">
+        <div class="sheet-grabber"></div>
+        <button id="sheetCloseBtn" class="sheet-close" title="Закрыть">
+          <i class="fa-solid fa-xmark"></i>
+        </button>
+        <div class="sheet-header">
+          <img id="sheetCover" class="sheet-cover" src="" alt="Обложка трека">
+          <div class="sheet-head-info">
+            <div id="sheetTitle" class="sheet-title">—</div>
+            <div id="sheetSub" class="sheet-sub">—</div>
+          </div>
+          <button id="sheetLikeBtn" class="sheet-like-btn" title="Лайк / Убрать лайк">
+            <i id="sheetLikeIcon" class="fa-regular fa-heart"></i>
+          </button>
+        </div>
+        <div class="sheet-actions">
+          <button id="sheetNextBtn" class="sheet-action-btn sheet-btn-secondary">
+            <i class="fa-solid fa-bars-staggered"></i> Следом
+          </button>
+          <button id="sheetPlayBtn" class="sheet-action-btn sheet-btn-primary">
+            <i class="fa-solid fa-play"></i> Слушать
+          </button>
+        </div>
+      </div>
+    </div>
 
     <!-- Multi-Method Login Modal -->
     <div id="loginModal" class="modal hidden">

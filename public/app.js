@@ -673,6 +673,7 @@ function playTrack(track, seekTo = 0) {
   const isWaveTrack = !!radioSessionId;
   currentTrack = track;
   playedTrackIds.add(String(track.id));
+  hideWaveEnded(); // новый трек отменяет состояние «Очередь закончилась»
   saveSession(seekTo || 0);
 
   // Stream URL
@@ -846,7 +847,8 @@ async function playNext() {
         startWave();
       }
     } else {
-      startWave();
+      // Вне волны очередь честно закончилась — экран конца вместо автозапуска волны
+      showWaveEnded();
     }
   }
 }
@@ -871,6 +873,7 @@ miniProgressBar.addEventListener("click", (e) => {
 
 // "Моя Волна" Continuous Fetch (NO LOOPS / REPEATS)
 async function startWave() {
+  hideWaveEnded();
   waveTrackTitle.textContent = "Запуск Волны...";
   waveTrackArtist.textContent = "Подбираем треки...";
   radioSessionId = null;
@@ -1032,6 +1035,20 @@ const FALLBACK_COVER = "data:image/svg+xml," + encodeURIComponent(
   '<svg xmlns="http://www.w3.org/2000/svg" width="48" height="48"><rect width="48" height="48" fill="#2a2a2a"/><text x="24" y="30" font-size="20" text-anchor="middle" fill="#555">♪</text></svg>'
 );
 
+// Suppress the click that always follows a long-press. Flag + capture-phase
+// once-listener on the list container: the capture stop happens before the
+// item's bubble handler can start playback.
+let sheetClickSuppressUntil = 0;
+function suppressNextClick(container) {
+  sheetClickSuppressUntil = Date.now() + 800;
+  container.addEventListener("click", (e) => {
+    if (Date.now() >= sheetClickSuppressUntil) return; // leftover listener — не блокируем
+    sheetClickSuppressUntil = 0;
+    e.stopPropagation();
+    e.preventDefault();
+  }, { capture: true, once: true });
+}
+
 // Generic track list renderer (used by Search and Likes)
 function renderTrackList(tracks, container, countEl, countLabel) {
   container.innerHTML = "";
@@ -1074,12 +1091,38 @@ function renderTrackList(tracks, container, countEl, countLabel) {
 
     item.append(cover, info, duration, playBtn);
     item.addEventListener("click", () => {
+      if (Date.now() < sheetClickSuppressUntil) return; // хвост лонг-пресса
       radioSessionId = null;
       queue = tracks;
       queueIndex = index;
       playTrack(track);
       if (container === searchResults) switchTab("tab-search");
     });
+
+    // --- Лонг-пресс (только touch): открыть sheet действий по треку ---
+    item.addEventListener("contextmenu", (e) => e.preventDefault());
+    let lpTimer = null;
+    let lpX = 0, lpY = 0;
+    const cancelLongPress = () => {
+      if (lpTimer) { clearTimeout(lpTimer); lpTimer = null; }
+    };
+    item.addEventListener("pointerdown", (e) => {
+      if (e.pointerType !== "touch") return;
+      lpX = e.clientX;
+      lpY = e.clientY;
+      cancelLongPress();
+      lpTimer = setTimeout(() => {
+        lpTimer = null;
+        openTrackSheet(track);
+        suppressNextClick(container);
+      }, 400);
+    });
+    item.addEventListener("pointermove", (e) => {
+      if (!lpTimer) return;
+      if (Math.abs(e.clientX - lpX) > 10 || Math.abs(e.clientY - lpY) > 10) cancelLongPress();
+    });
+    item.addEventListener("pointerup", cancelLongPress);
+    item.addEventListener("pointercancel", cancelLongPress);
     container.appendChild(item);
 
     // Mark the track that is already playing in this session (класс + иконка)
@@ -1189,25 +1232,17 @@ async function refreshLikeState() {
   updateHeartUI(trackIdLiked(currentTrack));
 }
 
-async function toggleLikeCurrent() {
-  if (!currentTrack) return;
+// Общий лайк-экшен: мини-плеер, волна и sheet-трек. Task 1: /api/like {remove:0|1}
+// поддерживает и добавление, и снятие (likes/tracks/remove, verified live).
+async function likeTrack(target) {
+  if (!target) return;
   if (!oauthToken) {
     toast("Нужен вход в аккаунт для лайков");
     openLoginModal();
     return;
   }
-  const target = currentTrack;
   const wasLiked = trackIdLiked(target);
   const remove = wasLiked ? 1 : 0;
-
-  if (remove) {
-    // The Yandex API (verified by probing 14 request shapes) does not support removing liked tracks.
-    toast("Трек уже в «Мне понравилось» — снятие недоступно через API");
-    updateHeartUI(true);
-    return;
-  }
-
-  if (wasLiked) { updateHeartUI(true); return; }
 
   try {
     const res = await fetch(`/api/like?token=${encodeURIComponent(oauthToken)}`, {
@@ -1217,21 +1252,156 @@ async function toggleLikeCurrent() {
     });
     const data = await res.json();
     if (data.ok) {
-      likedIds.add(String(target.id));
-      updateHeartUI(true);
+      if (remove) {
+        likedIds.delete(String(target.id));
+        toast("Убрано из «Мне понравилось»");
+      } else {
+        likedIds.add(String(target.id));
+        toast("Добавлено в «Мне понравилось» ❤");
+      }
+      likesDirty = true;
+      // Сердца везде синхронно: мини-плеер/волна + sheet-трек (если открыт)
+      updateHeartUI(trackIdLiked(currentTrack));
+      if (sheetTrack) applySheetHeart(trackIdLiked(sheetTrack));
       refreshLikesTabIfVisible();
-      toast("Добавлено в «Мне понравилось» ❤");
     } else {
-      toast(data.error || "Не удалось добавить лайк");
+      toast(data.error || "Не удалось изменить лайк");
     }
   } catch (e) {
     toast("Ошибка сети: " + e.message);
   }
 }
 
+async function toggleLikeCurrent() {
+  await likeTrack(currentTrack);
+}
+
 function refreshLikesTabIfVisible() {
   if (likesScreen.classList.contains("active") && likesLoaded) loadLikes(true);
 }
+
+// ===== Track Actions Sheet (лонг-пресс / тап по мини-плееру) =====
+const trackSheet = document.getElementById("trackSheet");
+const sheetBackdrop = document.getElementById("sheetBackdrop");
+const sheetCover = document.getElementById("sheetCover");
+const sheetTitle = document.getElementById("sheetTitle");
+const sheetSub = document.getElementById("sheetSub");
+const sheetLikeBtn = document.getElementById("sheetLikeBtn");
+const sheetLikeIcon = document.getElementById("sheetLikeIcon");
+const sheetNextBtn = document.getElementById("sheetNextBtn");
+const sheetPlayBtn = document.getElementById("sheetPlayBtn");
+const sheetCloseBtn = document.getElementById("sheetCloseBtn");
+const miniDetails = document.getElementById("miniDetails");
+const waveEnded = document.getElementById("waveEnded");
+const waveEndedBtn = document.getElementById("waveEndedBtn");
+
+let sheetTrack = null;
+let sheetOpenedAt = 0;
+
+function applySheetHeart(liked) {
+  sheetLikeIcon.className = liked ? "fa-solid fa-heart" : "fa-regular fa-heart";
+  sheetLikeBtn.classList.toggle("liked", liked);
+}
+
+// Сердце sheet-трека: локальное состояние (likedIds) мгновенно; если общий
+// список лайков ещё не подгружен/краснеет после изменений (likesDirty) —
+// точечная проверка батч-эндпоинтом /api/like-status, без ломающего
+// refreshLikeState.
+async function refreshSheetLikeState() {
+  if (!sheetTrack) return;
+  const track = sheetTrack;
+  applySheetHeart(trackIdLiked(track));
+  if (!oauthToken || (likesLoaded && !likesDirty)) return;
+  try {
+    const res = await fetch(
+      `/api/like-status?ids=${encodeURIComponent(String(track.id))}` +
+      `&token=${encodeURIComponent(oauthToken)}`
+    );
+    const data = await res.json();
+    const liked = (data.likedIds || []).includes(String(track.id));
+    if (liked) likedIds.add(String(track.id));
+    else likedIds.delete(String(track.id));
+    if (sheetTrack === track) applySheetHeart(liked);
+  } catch (e) {}
+}
+
+function openTrackSheet(track) {
+  if (!track) return;
+  sheetTrack = track;
+  sheetTitle.textContent = track.title;
+  // «артисты · альбом · mm:ss»
+  sheetSub.textContent = [track.artists, track.album, formatDuration(track.durationMs)]
+    .filter(Boolean).join(" · ");
+  sheetCover.onerror = () => { sheetCover.src = FALLBACK_COVER; };
+  sheetCover.src = track.coverUri || FALLBACK_COVER;
+  sheetOpenedAt = Date.now();
+  trackSheet.classList.remove("hidden");
+  refreshSheetLikeState();
+}
+
+function closeTrackSheet() {
+  trackSheet.classList.add("hidden");
+  sheetTrack = null;
+}
+
+// «Следом»: в волне очередь ведёт Яндекс — не вставляем
+function addTrackNext() {
+  if (!sheetTrack) return;
+  if (radioSessionId !== null) {
+    toast("В волне очередь ведёт Яндекс");
+    return;
+  }
+  queue.splice(queueIndex + 1, 0, sheetTrack);
+  toast("Следом за текущим");
+  saveSession(); // внутри игнорируется, если currentTrack нет
+}
+
+// «Слушать»: вне радио — очередь из одного трека, как из поиска
+function playTrackFromSheet() {
+  if (!sheetTrack) return;
+  radioSessionId = null;
+  queue = [sheetTrack];
+  queueIndex = 0;
+  playTrack(sheetTrack); // прячет плашку конца очереди, сохраняет сессию
+  closeTrackSheet();
+}
+
+sheetCloseBtn.addEventListener("click", closeTrackSheet);
+sheetBackdrop.addEventListener("click", closeTrackSheetFromBackdrop);
+sheetLikeBtn.addEventListener("click", () => likeTrack(sheetTrack));
+sheetNextBtn.addEventListener("click", addTrackNext);
+sheetPlayBtn.addEventListener("click", playTrackFromSheet);
+miniDetails.addEventListener("click", () => {
+  if (currentTrack) openTrackSheet(currentTrack);
+});
+
+// Клик по только что открывшемуся backdrop — это хвост касания от лонг-пресса,
+// не попытка закрыть: игнорируем первые 500 мс.
+function closeTrackSheetFromBackdrop() {
+  if (Date.now() - sheetOpenedAt < 500) return;
+  closeTrackSheet();
+}
+
+// Escape закрывает sheet (у loginModal своего Escape-обработчика нет)
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && !trackSheet.classList.contains("hidden")) closeTrackSheet();
+});
+
+// ===== Конец очереди (вне волны) =====
+function showWaveEnded() {
+  waveTrackTitle.textContent = "Очередь закончилась";
+  waveTrackArtist.textContent = "Волна не запущена";
+  waveEnded.classList.remove("hidden");
+}
+
+function hideWaveEnded() {
+  waveEnded.classList.add("hidden");
+}
+
+waveEndedBtn.addEventListener("click", () => {
+  hideWaveEnded();
+  startWave();
+});
 
 async function dislikeAndSkip() {
   if (radioSessionId && currentTrack) sendRotorFeedback("dislike");
