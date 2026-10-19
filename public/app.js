@@ -16,6 +16,50 @@ let quality = localStorage.getItem("ym_quality") || "nq";
 let oauthToken = getToken();
 let cachedUserStr = localStorage.getItem("ym_user");
 
+// --- Play tracking: report real listening time to Yandex (play-audio) ---
+// playId regenerates per track start; playedSeconds accumulates real (non-seek) time
+let playReport = { playId: null, playedSeconds: 0, lastPos: 0 };
+
+function startPlayReport() {
+  playReport.playId = (crypto && crypto.randomUUID) ? crypto.randomUUID() : "pm-" + Date.now() + "-" + Math.random().toString(36).slice(2);
+  playReport.playedSeconds = 0;
+  playReport.lastPos = 0;
+}
+
+function accumulatePlayTime() {
+  const now = audio.currentTime;
+  const delta = now - playReport.lastPos;
+  // calls tick ~4 Hz; a big positive jump is a seek — not listening time
+  if (delta > 0 && delta < 1.5) playReport.playedSeconds += delta;
+  playReport.lastPos = now;
+}
+
+function sendPlayReport(finished) {
+  if (!currentTrack || !playReport.playId) return;
+  // Yandex counts a listen from 30 seconds of playback (even partial)
+  if (!finished && playReport.playedSeconds < 30) { playReport.playId = null; return; }
+  const payload = {
+    trackId: String(currentTrack.id),
+    albumId: currentTrack.albumId ? String(currentTrack.albumId) : "",
+    playId: playReport.playId,
+    from: "web-mod",
+    playedSeconds: Math.max(1, Math.round(playReport.playedSeconds)),
+    trackLengthSeconds: audio.duration && isFinite(audio.duration)
+      ? Math.round(audio.duration)
+      : Math.round((currentTrack.durationMs || 0) / 1000),
+    endPositionSeconds: Math.round(playReport.lastPos),
+    finished: !!finished,
+  };
+  playReport.playId = null; // guard against double-send
+  const url = `/api/play-audio${oauthToken ? `?token=${encodeURIComponent(oauthToken)}` : ""}`;
+  const body = JSON.stringify(payload);
+  try {
+    if (oauthToken && navigator.sendBeacon && navigator.sendBeacon(url, new Blob([body], { type: "application/json" }))) return;
+  } catch (e) {}
+  fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body, keepalive: true })
+    .catch((e) => console.warn("play-audio report failed:", e));
+}
+
 // --- Token persistence: localStorage (Android/desktop Chrome) ---
 function getToken() {
   try { return localStorage.getItem("ym_token") || ""; } catch (e) { return ""; }
@@ -475,6 +519,7 @@ document.querySelectorAll(".nav-btn").forEach((btn) => {
     // Load likes/playlists lazily on first open
     if (tabId === "tab-likes") loadLikes();
     if (tabId === "tab-playlists") loadPlaylists();
+    if (tabId === "tab-smart") loadSmart();
   });
 });
 
@@ -536,6 +581,9 @@ function playTrack(track, seekTo = 0) {
   updateTrackUI(track);
   updateMediaSession(track);
   updateNextPreview();
+
+  // New play session for play-audio reporting
+  startPlayReport();
 
   // Tell Yandex the track started so the Wave session stays alive
   if (isWaveTrack) sendRotorFeedback("trackStarted");
@@ -610,6 +658,7 @@ audio.addEventListener("play", () => { consecutiveErrors = 0; setPlayState(true)
 audio.addEventListener("pause", () => setPlayState(false));
 audio.addEventListener("loadedmetadata", () => showTime());
 audio.addEventListener("timeupdate", () => {
+  accumulatePlayTime();
   if (audio.duration) {
     const percent = (audio.currentTime / audio.duration) * 100;
     miniProgressFill.style.width = percent + "%";
@@ -657,6 +706,8 @@ function playPrev() {
 }
 
 async function playNext() {
+  // Report the finished/abandoned track before switching away from it
+  sendPlayReport(!!audio.ended);
   if (radioSessionId && currentTrack) sendRotorFeedback("skip");
   if (queueIndex < queue.length - 1) {
     queueIndex++;
@@ -1194,6 +1245,96 @@ async function openPlaylist(pl) {
 
 playlistsBackBtn.addEventListener("click", () => renderPlaylistsGrid());
 playlistsRefreshBtn.addEventListener("click", () => loadPlaylists(true));
+
+// ===== Smart Playlists («Подборки») =====
+const smartGrid = document.getElementById("smartGrid");
+const smartLoader = document.getElementById("smartLoader");
+const smartRefreshBtn = document.getElementById("smartRefreshBtn");
+
+let smartData = [];
+let smartLoaded = false;
+let smartLoading = false;
+
+function showSmartEmpty(msg) {
+  smartGrid.innerHTML = `<div class="likes-empty-state"><i class="fa-solid fa-wand-magic-sparkles"></i><p>${msg}</p></div>`;
+}
+
+async function loadSmart(force = false) {
+  if (smartLoading) return;
+  if (smartLoaded && !force) return;
+
+  if (!oauthToken) {
+    showSmartEmpty("Войдите в аккаунт, чтобы увидеть подборки");
+    return;
+  }
+
+  smartLoading = true;
+  smartLoader.classList.remove("hidden");
+  try {
+    const res = await fetch(`/api/smart-playlists?token=${encodeURIComponent(oauthToken)}`);
+    const data = await res.json();
+    if (data.guest) {
+      smartLoaded = false;
+      showSmartEmpty("Токен недействителен — войдите заново");
+    } else {
+      smartData = data.playlists || [];
+      smartLoaded = true;
+      renderSmartGrid();
+    }
+  } catch (e) {
+    showSmartEmpty("Ошибка загрузки: " + e.message);
+  } finally {
+    smartLoading = false;
+    smartLoader.classList.add("hidden");
+  }
+}
+
+function renderSmartGrid() {
+  smartGrid.innerHTML = "";
+  if (smartData.length === 0) {
+    showSmartEmpty("Подборки не найдены");
+    return;
+  }
+  smartData.forEach((pl) => {
+    const card = document.createElement("div");
+    card.className = "playlist-card";
+
+    const cover = document.createElement("img");
+    cover.src = pl.coverUri || FALLBACK_COVER;
+    cover.alt = pl.title;
+    cover.onerror = () => { cover.src = FALLBACK_COVER; };
+
+    const meta = document.createElement("div");
+    meta.className = "playlist-meta";
+    const t = document.createElement("div");
+    t.className = "playlist-name";
+    t.textContent = pl.title;
+    const c = document.createElement("div");
+    c.className = "playlist-count";
+    c.textContent = pl.description || "Слушать подборку";
+    meta.append(t, c);
+    card.append(cover, meta);
+
+    card.addEventListener("click", () => playSmart(pl));
+    smartGrid.appendChild(card);
+  });
+}
+
+function playSmart(pl) {
+  const tracks = pl.tracks || [];
+  if (tracks.length === 0) {
+    toast("В подборке нет треков");
+    return;
+  }
+  // smart queue replaces both wave and any previous queue
+  radioSessionId = null;
+  queue = tracks;
+  queueIndex = 0;
+  playTrack(tracks[0]);
+  switchTab("tab-wave");
+}
+
+smartRefreshBtn.addEventListener("click", () => loadSmart(true));
 
 // ===== Sleep Timer =====
 let sleepTimer = null;

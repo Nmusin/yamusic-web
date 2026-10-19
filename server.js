@@ -57,7 +57,9 @@ function yandexRequest(targetUrl, token, method = "GET", postData = null) {
       headers["Content-Type"] = "application/json";
     }
 
-    const req = https.request(parsed, { method, headers }, (res) => {
+    // Yandex DNS может отдавать только IPv6-адрес, а исходящий IPv6 часто недоступен
+    // (TTL у IPv6-ответа есть, пакетов нет) — форсируем IPv4 везде, где ходим наружу
+    const req = https.request(parsed, { method, headers, family: 4 }, (res) => {
       let data = "";
       res.on("data", (chunk) => (data += chunk));
       res.on("end", () => {
@@ -78,7 +80,7 @@ function yandexRequest(targetUrl, token, method = "GET", postData = null) {
   });
 }
 
-function httpsPostForm(targetUrl, params) {
+function httpsPostForm(targetUrl, params, token = null) {
   return new Promise((resolve, reject) => {
     const parsed = new URL(targetUrl);
     const body = new URLSearchParams(params).toString();
@@ -87,8 +89,11 @@ function httpsPostForm(targetUrl, params) {
       "Content-Length": Buffer.byteLength(body),
       "User-Agent": "YandexMusic/5.46.2",
     };
+    if (token) {
+      headers["Authorization"] = token.startsWith("OAuth ") ? token : `OAuth ${token}`;
+    }
 
-    const req = https.request(parsed, { method: "POST", headers }, (res) => {
+    const req = https.request(parsed, { method: "POST", headers, family: 4 }, (res) => {
       let data = "";
       res.on("data", (chunk) => (data += chunk));
       res.on("end", () => {
@@ -533,6 +538,7 @@ const server = http.createServer(async (req, res) => {
               : t.ogImage
               ? "https://" + t.ogImage.replace("%%", "400x400")
               : null,
+            albumId: t.albums && t.albums[0] ? String(t.albums[0].id) : null,
             durationMs: t.durationMs || 0,
           };
         });
@@ -584,7 +590,7 @@ const server = http.createServer(async (req, res) => {
 // HEAD request to storage — to learn the real file size
 function httpsHead(targetUrl) {
   return new Promise((resolve, reject) => {
-    const req = https.request(targetUrl, { method: "HEAD" }, (res) => {
+    const req = https.request(targetUrl, { method: "HEAD", family: 4 }, (res) => {
       res.resume();
       clearTimeout(t);
       resolve({
@@ -939,6 +945,109 @@ if (pathname === "/api/playlist-tracks") {
   return;
 }
 
+  // --- API: Smart playlists («Подборки») from feed: daily / dejavu / premiere / missed ---
+  if (pathname === "/api/smart-playlists") {
+    const token = resolveToken(query.token);
+    if (!token) {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ playlists: [], guest: true }));
+      return;
+    }
+    try {
+      const resp = await yandexCached(
+        "https://api.music.yandex.net/feed",
+        token, 5 * 60 * 1000
+      );
+      const feed = resp.data?.result || resp.data || {};
+      const variants = Array.isArray(feed.generatedPlaylists) ? feed.generatedPlaylists : [];
+
+      // Типы генеративных подборок по контракту API (MarshalX/yandex-music-api):
+      // playlistOfTheDay («Премьера»), recentTracks, neverHeard («Дежавю»), missedLikes,
+      // origin, podcasts. Игровые смарты — это персональные музыкальные; podcasts не треки.
+      const wanted = new Set(["playlistOfTheDay", "recentTracks", "neverHeard", "missedLikes", "origin", "day", "day-weekly", "monthly"]);
+      const clean = [];
+      for (const p of variants) {
+        const type = p?.type || p?.data?.generatedPlaylistType;
+        if (!type || !wanted.has(type) || p.ready === false || p?.data?.isBanner) continue;
+        const da = p.data || p.playlist || {}; // data — сам плейлист
+        const ids = (Array.isArray(da.tracks) ? da.tracks : [])
+          .map((t) => String(t && typeof t === "object" ? (t.track ? t.track.id : t.id) : t))
+          .filter(Boolean);
+        const items = await fetchTracksByIds(ids, token);
+        const byId = new Map(items.map((t) => [String(t.id), t]));
+        const tracks = ids
+          .map((id) => byId.get(id))
+          .filter(Boolean)
+          .map((t) => ({
+            id: String(t.id),
+            title: t.title,
+            artists: t.artists ? t.artists.map((a) => a.name).join(", ") : "Unknown",
+            album: t.albums && t.albums[0] ? t.albums[0].title : null,
+            albumId: t.albums && t.albums[0] ? String(t.albums[0].id) : null,
+            coverUri: t.coverUri
+              ? "https://" + t.coverUri.replace("%%", "400x400")
+              : t.ogImage
+              ? "https://" + t.ogImage.replace("%%", "400x400")
+              : null,
+            durationMs: t.durationMs || 0,
+          }));
+
+        const coverSrc = da.coverUri || da.ogImage ||
+          (da.cover && (da.cover.uri || (da.cover.itemsUri || [])[0]));
+        clean.push({
+          id: da.kind != null ? `${da.uid || da.owner || ""}:${da.kind}` : String(type),
+          title: da.title || "Подборка",
+          description: da.description || p.description || "",
+          coverUri: coverSrc ? "https://" + String(coverSrc).replace("%%", "400x400") : null,
+          tracks,
+        });
+      }
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ playlists: clean }));
+    } catch (e) {
+      res.writeHead(500, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: e.message }));
+    }
+    return;
+  }
+
+  // --- API: Play audio report (proxy to api.music.yandex.net/play-audio) ---
+  if (pathname === "/api/play-audio" && req.method === "POST") {
+    const token = resolveToken(query.token);
+    if (!token) {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: false, guest: true }));
+      return;
+    }
+    const body = await parseBody(req);
+    if (!body.trackId || !body.playId) {
+      res.writeHead(400, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: false, error: "Missing trackId or playId" }));
+      return;
+    }
+    const params = {
+      "track-id": String(body.trackId),
+      "album-id": String(body.albumId || ""),
+      "play-id": String(body.playId),
+      from: String(body.from || "web-mod"),
+      "from-cache": "false",
+      "total-played-seconds": String(Number(body.playedSeconds) || 0),
+      "track-length-seconds": String(Number(body.trackLengthSeconds) || 0),
+      "end-position-seconds": String(Number(body.endPositionSeconds) || 0),
+      timestamp: new Date().toISOString(),
+      "client-now": new Date().toISOString(),
+    };
+    try {
+      const result = await httpsPostForm("https://api.music.yandex.net/play-audio", params, token);
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: result.status === 200, status: result.status, data: result.data || result.raw || null }));
+    } catch (e) {
+      res.writeHead(500, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: false, error: e.message }));
+    }
+    return;
+  }
+
   // --- API: Audio Stream (with on-the-fly AES-CTR decryption) ---
   if (pathname === "/api/stream") {
     const trackId = query.id;
@@ -981,7 +1090,7 @@ if (pathname === "/api/playlist-tracks") {
       const storageReq = (withRange) => new Promise((resolve) => {
         const headers = {};
         if (withRange && rangeStart) headers["Range"] = `bytes=${rangeStart}-`;
-        const r = https.get(streamUrl, { headers }, (upRes) => {
+        const r = https.get(streamUrl, { headers, family: 4 }, (upRes) => {
           clearTimeout(t);
           resolve(upRes);
         });

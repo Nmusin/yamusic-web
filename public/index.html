@@ -146,6 +146,31 @@
         </div>
       </section>
 
+      <!-- Section: Smart Playlists -->
+      <section id="tab-smart" class="tab-content">
+        <div class="likes-screen">
+          <div class="likes-header-row">
+            <h3>Подборки</h3>
+            <button id="smartRefreshBtn" class="likes-refresh-btn" title="Обновить">
+              <i class="fa-solid fa-rotate-right"></i>
+            </button>
+          </div>
+
+          <div id="smartLoader" class="loader hidden">
+            <i class="fa-solid fa-circle-notch fa-spin"></i>
+            <p>Загружаем подборки...</p>
+          </div>
+
+          <!-- Grid of smart playlists (cards play immediately) -->
+          <div id="smartGrid" class="playlists-grid">
+            <div class="likes-empty-state">
+              <i class="fa-solid fa-wand-magic-sparkles"></i>
+              <p>Войдите в аккаунт, чтобы увидеть подборки</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
       <!-- Section: Liked Tracks -->
       <section id="tab-likes" class="tab-content">
         <div class="likes-screen">
@@ -276,6 +301,10 @@
       <button class="nav-btn active" data-tab="tab-wave">
         <i class="fa-solid fa-water"></i>
         <span>Волна</span>
+      </button>
+      <button class="nav-btn" data-tab="tab-smart">
+        <i class="fa-solid fa-wand-magic-sparkles"></i>
+        <span>Подборки</span>
       </button>
       <button class="nav-btn" data-tab="tab-search">
         <i class="fa-solid fa-magnifying-glass"></i>
