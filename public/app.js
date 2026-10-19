@@ -207,6 +207,27 @@ const miniProgressBar = document.getElementById("miniProgressBar");
 const miniProgressFill = document.getElementById("miniProgressFill");
 const miniTime = document.getElementById("miniTime");
 
+// UI Elements - Full Player Screen (AMOLED, открывается с мини-плеера)
+const playerScreen = document.getElementById("playerScreen");
+const fullCloseBtn = document.getElementById("fullCloseBtn");
+const fullCover = document.getElementById("fullCover");
+const fullTitle = document.getElementById("fullTitle");
+const fullArtist = document.getElementById("fullArtist");
+const fullLikeBtn = document.getElementById("fullLikeBtn");
+const fullLikeIcon = document.getElementById("fullLikeIcon");
+const fullTimeElapsed = document.getElementById("fullTimeElapsed");
+const fullTimeTotal = document.getElementById("fullTimeTotal");
+const fullProgress = document.getElementById("fullProgress");
+const fullProgressFill = document.getElementById("fullProgressFill");
+const fullProgressKnob = document.getElementById("fullProgressKnob");
+const fullPrevBtn = document.getElementById("fullPrevBtn");
+const fullBack10Btn = document.getElementById("fullBack10Btn");
+const fullFwd10Btn = document.getElementById("fullFwd10Btn");
+const fullNextBtn = document.getElementById("fullNextBtn");
+const fullPlayBtn = document.getElementById("fullPlayBtn");
+const fullPlayIcon = document.getElementById("fullPlayIcon");
+const fullStopBtn = document.getElementById("fullStopBtn");
+
 // UI Elements - Playlists
 const playlistsScreen = document.getElementById("tab-playlists");
 const playlistsGrid = document.getElementById("playlistsGrid");
@@ -724,6 +745,9 @@ function updateTrackUI(track) {
   miniArtist.textContent = track.artists;
   miniCover.src = track.coverUri || FALLBACK_COVER;
 
+  // Full player screen UI
+  updateFullPlayerUI(track);
+
   // Highlight currently playing track in search/likes/playlist lists.
   // Сначала полный сброс: класс + иконка на ВСЕХ ранее подсвеченных элементах,
   // иначе у прошлого трека навсегда остаётся fa-pause.
@@ -758,10 +782,12 @@ function setPlayState(playing) {
     waveBtn.classList.add("playing");
     wavePlayIcon.className = "fa-solid fa-pause";
     miniPlayIcon.className = "fa-solid fa-pause";
+    fullPlayIcon.className = "fa-solid fa-pause";
   } else {
     waveBtn.classList.remove("playing");
     wavePlayIcon.className = "fa-solid fa-play";
     miniPlayIcon.className = "fa-solid fa-play";
+    fullPlayIcon.className = "fa-solid fa-play";
   }
 }
 
@@ -772,11 +798,12 @@ audio.addEventListener("loadedmetadata", () => showTime());
 audio.addEventListener("timeupdate", () => {
   accumulatePlayTime();
   savePosition();
-  if (audio.duration) {
-    const percent = (audio.currentTime / audio.duration) * 100;
-    miniProgressFill.style.width = percent + "%";
-    showTime();
-  }
+    if (audio.duration) {
+      const percent = (audio.currentTime / audio.duration) * 100;
+      miniProgressFill.style.width = percent + "%";
+      updateFullProgress();
+      showTime();
+    }
 });
 // Auto-skip broken streams, but never loop endlessly on a broken connection
 audio.addEventListener("error", () => {
@@ -1229,6 +1256,10 @@ function updateHeartUI(liked) {
     waveLikeIcon.className = iconClass;
     btnLikeWave.classList.toggle("liked", liked);
   }
+  if (fullLikeIcon) {
+    fullLikeIcon.className = iconClass;
+    fullLikeBtn.classList.toggle("liked", liked);
+  }
 }
 
 async function refreshLikeState() {
@@ -1394,8 +1425,39 @@ sheetBackdrop.addEventListener("click", closeTrackSheetFromBackdrop);
 sheetLikeBtn.addEventListener("click", () => likeTrack(sheetTrack));
 sheetNextBtn.addEventListener("click", addTrackNext);
 sheetPlayBtn.addEventListener("click", playTrackFromSheet);
+// Мини-плеер: тап по инфо-зоне/обложке → полный экран плеера;
+// лонг-пресс → карточка трека (как в списках: тап — крупное действие).
 miniDetails.addEventListener("click", () => {
-  if (currentTrack) openTrackSheet(currentTrack);
+  if (currentTrack) openPlayer();
+});
+miniCover.style.cursor = "pointer";
+miniCover.addEventListener("click", () => {
+  if (currentTrack) openPlayer();
+});
+let miniPressTimer = null;
+let miniPressStart = null;
+function cancelMiniPress() {
+  if (miniPressTimer) { clearTimeout(miniPressTimer); miniPressTimer = null; }
+}
+["miniDetails", "miniCover"].forEach((idName) => {
+  const el = document.getElementById(idName);
+  el.addEventListener("pointerdown", (e) => {
+    if (e.pointerType !== "touch" || !currentTrack) return;
+    miniPressStart = { x: e.clientX, y: e.clientY };
+    cancelMiniPress();
+    miniPressTimer = setTimeout(() => {
+      miniPressTimer = null;
+      suppressNextClick(el); // гашу хвостовой тап тем же механизмом, что в списках
+      openTrackSheet(currentTrack);
+    }, 400);
+  });
+  el.addEventListener("pointermove", (e) => {
+    if (!miniPressTimer || !miniPressStart) return;
+    if (Math.abs(e.clientX - miniPressStart.x) > 10 || Math.abs(e.clientY - miniPressStart.y) > 10) cancelMiniPress();
+  });
+  el.addEventListener("pointerup", cancelMiniPress);
+  el.addEventListener("pointercancel", cancelMiniPress);
+  el.addEventListener("contextmenu", (e) => e.preventDefault());
 });
 
 // Клик по только что открывшемуся backdrop — это хвост касания от лонг-пресса,
@@ -1736,24 +1798,195 @@ qualityTestBtn.addEventListener("click", async () => {
 });
 
 // Android Lockscreen & Headset controls via MediaSession API
+// Референс: googlechrome.github.io/samples/media-session/audio.html + MDN setPositionState.
+function msCoverUrl(track, size) {
+  // Сервер отдаёт уже подставленный размер (200x200/400x400). Для обложки
+  // плеера/уведомления поднимаем до size, если шаблон не подставлен раньше.
+  if (!track.coverUri) return FALLBACK_COVER;
+  return track.coverUri.replace(/(\d+)x(\d+)/, size);
+}
+
+function updatePositionState() {
+  if ("mediaSession" in navigator && "setPositionState" in navigator.mediaSession) {
+    if (!audio.duration) return; // MDN: duration обязателен, иначе TypeError
+    try {
+      navigator.mediaSession.setPositionState({
+        duration: audio.duration,
+        playbackRate: audio.playbackRate,
+        position: Math.min(audio.currentTime, audio.duration),
+      });
+    } catch (e) {}
+  }
+}
+
 function updateMediaSession(track) {
   if ("mediaSession" in navigator) {
     navigator.mediaSession.metadata = new MediaMetadata({
       title: track.title,
       artist: track.artists,
       album: track.album || "Яндекс Музыка",
-      artwork: track.coverUri ? [{ src: track.coverUri, sizes: "400x400", type: "image/jpeg" }] : [],
+      artwork: track.coverUri ? [
+        { src: msCoverUrl(track, "200x200"), sizes: "200x200", type: "image/jpeg" },
+        { src: msCoverUrl(track, "600x600"), sizes: "600x600", type: "image/jpeg" },
+      ] : [],
     });
 
-    navigator.mediaSession.setActionHandler("play", () => audio.play());
-    navigator.mediaSession.setActionHandler("pause", () => audio.pause());
-    navigator.mediaSession.setActionHandler("nexttrack", () => playNext());
-    navigator.mediaSession.setActionHandler("previoustrack", () => playPrev());
-    navigator.mediaSession.setActionHandler("seekto", (details) => {
-      if (details.seekTime) audio.currentTime = details.seekTime;
-    });
+    // Важно: setActionHandler для каждого действия отдельным try/catch —
+    // одно неподдерживаемое действие не должно глушить остальные.
+    const actions = {
+      play: () => audio.play().catch(() => {}),
+      pause: () => audio.pause(),
+      stop: () => stopPlayback(),
+      nexttrack: () => playNext(),
+      previoustrack: () => playPrev(),
+      seekbackward: (details) => {
+        const skip = details.seekOffset || 10;
+        if (audio.duration) {
+          audio.currentTime = Math.max(audio.currentTime - skip, 0);
+          updatePositionState();
+        }
+      },
+      seekforward: (details) => {
+        const skip = details.seekOffset || 10;
+        if (audio.duration) {
+          audio.currentTime = Math.min(audio.currentTime + skip, audio.duration);
+          updatePositionState();
+        }
+      },
+      seekto: (details) => {
+        if (details.seekTime == null) return;
+        if (details.fastSeek && "fastSeek" in audio) {
+          audio.fastSeek(details.seekTime);
+        } else {
+          audio.currentTime = details.seekTime;
+        }
+        updatePositionState();
+      },
+    };
+    for (const [action, handler] of Object.entries(actions)) {
+      try {
+        navigator.mediaSession.setActionHandler(action, handler);
+      } catch (e) {}
+    }
   }
 }
+
+// Останов: пауза + откат позиции; состояние иконок — через события audio.
+function stopPlayback() {
+  audio.pause();
+  audio.currentTime = 0;
+  updatePositionState();
+}
+
+// ---------- Full Player Screen ----------
+function isPlayerOpen() {
+  return !playerScreen.classList.contains("hidden");
+}
+
+function openPlayer() {
+  if (currentTrack) updateFullPlayerUI(currentTrack);
+  updateFullProgress();
+  playerScreen.classList.remove("hidden");
+}
+
+function closePlayer() {
+  playerScreen.classList.add("hidden");
+}
+
+function updateFullPlayerUI(track) {
+  fullTitle.textContent = track.title;
+  fullArtist.textContent = track.artists;
+  fullCover.onerror = () => { fullCover.onerror = null; fullCover.src = FALLBACK_COVER; };
+  fullCover.src = msCoverUrl(track, "600x600");
+  const liked = trackIdLiked(track);
+  fullLikeIcon.className = liked ? "fa-solid fa-heart" : "fa-regular fa-heart";
+  fullLikeBtn.classList.toggle("liked", liked);
+  fullTimeTotal.textContent = formatTime(track.durationMs ? track.durationMs / 1000 : (audio.duration || 0));
+}
+
+function updateFullProgress() {
+  if (!audio.duration) {
+    fullProgressFill.style.width = "0%";
+    fullProgressKnob.style.left = "0%";
+    fullTimeElapsed.textContent = "0:00";
+    return;
+  }
+  const percent = Math.min(audio.currentTime / audio.duration, 1) * 100;
+  fullProgressFill.style.width = percent + "%";
+  fullProgressKnob.style.left = percent + "%";
+  fullTimeElapsed.textContent = formatTime(audio.currentTime);
+}
+
+// Перемотка: drag-полоса (pointer events + setPointerCapture).
+let scrubbing = false;
+fullProgress.addEventListener("pointerdown", (e) => {
+  if (!audio.duration) return;
+  scrubbing = true;
+  fullProgress.setPointerCapture(e.pointerId);
+  scrubToClientX(e.clientX);
+});
+fullProgress.addEventListener("pointermove", (e) => {
+  if (!scrubbing) return;
+  scrubToClientX(e.clientX);
+});
+fullProgress.addEventListener("pointerup", (e) => {
+  if (!scrubbing) return;
+  scrubbing = false;
+  if (audio.duration) {
+    audio.currentTime = clientXToSeconds(e.clientX);
+    updatePositionState();
+  }
+});
+fullProgress.addEventListener("pointercancel", () => { scrubbing = false; updateFullProgress(); });
+
+function scrubToClientX(clientX) {
+  if (!audio.duration) return;
+  const seconds = clientXToSeconds(clientX);
+  const percent = Math.min(seconds / audio.duration, 1) * 100;
+  fullProgressFill.style.width = percent + "%";
+  fullProgressKnob.style.left = percent + "%";
+  fullTimeElapsed.textContent = formatTime(seconds);
+}
+
+function clientXToSeconds(clientX) {
+  const rect = fullProgress.getBoundingClientRect();
+  const p = Math.min(Math.max((clientX - rect.left) / rect.width, 0), 1);
+  return p * audio.duration;
+}
+
+// Крупный ряд управления
+fullPrevBtn.addEventListener("click", playPrev);
+fullNextBtn.addEventListener("click", playNext);
+fullPlayBtn.addEventListener("click", togglePlayPause);
+fullBack10Btn.addEventListener("click", () => {
+  if (audio.duration) {
+    audio.currentTime = Math.max(audio.currentTime - 10, 0);
+    updatePositionState();
+  }
+});
+fullFwd10Btn.addEventListener("click", () => {
+  if (audio.duration) {
+    audio.currentTime = Math.min(audio.currentTime + 10, audio.duration);
+    updatePositionState();
+  }
+});
+fullStopBtn.addEventListener("click", stopPlayback);
+fullCloseBtn.addEventListener("click", closePlayer);
+fullLikeBtn.addEventListener("click", () => likeTrack(currentTrack));
+
+// Синхронизация playbackState уведомления с событиями самого <audio>.
+audio.addEventListener("play", () => {
+  if ("mediaSession" in navigator && "playbackState" in navigator.mediaSession) {
+    navigator.mediaSession.playbackState = "playing";
+  }
+});
+audio.addEventListener("pause", () => {
+  if ("mediaSession" in navigator && "playbackState" in navigator.mediaSession) {
+    navigator.mediaSession.playbackState = "paused";
+  }
+});
+audio.addEventListener("loadedmetadata", () => updatePositionState());
+audio.addEventListener("seeked", () => updatePositionState());
 
 // PWA: регистрация service worker (только https или localhost)
 if ("serviceWorker" in navigator && (/^https:$/.test(location.protocol) || location.hostname === "localhost")) {

@@ -275,6 +275,53 @@
       </section>
     </main>
 
+    <!-- Full Player Screen -->
+    <div class="player-screen hidden" id="playerScreen">
+      <div class="player-screen-top">
+        <button id="fullCloseBtn" class="btn-icon player-close" title="Свернуть">
+          <i class="fa-solid fa-chevron-down"></i>
+        </button>
+      </div>
+      <img id="fullCover" class="full-cover" alt="Обложка трека" draggable="false">
+      <div class="full-info">
+        <div class="full-info-text">
+          <div class="full-title" id="fullTitle">Нет трека</div>
+          <div class="full-artist" id="fullArtist">—</div>
+        </div>
+        <button id="fullLikeBtn" class="btn-icon full-like" title="Лайк / Убрать лайк">
+          <i class="fa-regular fa-heart" id="fullLikeIcon"></i>
+        </button>
+      </div>
+      <div class="full-progress-row">
+        <span class="full-time" id="fullTimeElapsed">0:00</span>
+        <div class="full-progress" id="fullProgress">
+          <div class="full-progress-fill" id="fullProgressFill"></div>
+          <div class="full-progress-knob" id="fullProgressKnob"></div>
+        </div>
+        <span class="full-time" id="fullTimeTotal">0:00</span>
+      </div>
+      <div class="full-controls">
+        <button id="fullPrevBtn" class="btn-icon full-ctl" title="Предыдущий">
+          <i class="fa-solid fa-backward-step"></i>
+        </button>
+        <button id="fullBack10Btn" class="btn-icon full-ctl ctl-skip" title="Назад 10 секунд">
+          <i class="fa-solid fa-rotate-left"></i><span class="skip-num">10</span>
+        </button>
+        <button id="fullPlayBtn" class="full-play" title="Воспроизведение / Пауза">
+          <i class="fa-solid fa-play" id="fullPlayIcon"></i>
+        </button>
+        <button id="fullFwd10Btn" class="btn-icon full-ctl ctl-skip" title="Вперёд 10 секунд">
+          <i class="fa-solid fa-rotate-right"></i><span class="skip-num">10</span>
+        </button>
+        <button id="fullNextBtn" class="btn-icon full-ctl" title="Следующий">
+          <i class="fa-solid fa-forward-step"></i>
+        </button>
+      </div>
+      <button id="fullStopBtn" class="btn-icon full-stop" title="Остановить">
+        <i class="fa-solid fa-stop"></i><span>Стоп</span>
+      </button>
+    </div>
+
     <!-- Bottom MiniPlayer -->
     <div class="mini-player" id="miniPlayer">
       <div class="mini-progress-bar-container" id="miniProgressBar">
