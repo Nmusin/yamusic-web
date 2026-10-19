@@ -1039,14 +1039,33 @@ const FALLBACK_COVER = "data:image/svg+xml," + encodeURIComponent(
 // once-listener on the list container: the capture stop happens before the
 // item's bubble handler can start playback.
 let sheetClickSuppressUntil = 0;
+// container -> drain-listener: максимум один живой подавитель на контейнер,
+// иначе once-анонимные листенеры накапливаются на постоянных контейнерах.
+const sheetClickDrains = new Map();
 function suppressNextClick(container) {
   sheetClickSuppressUntil = Date.now() + 800;
-  container.addEventListener("click", (e) => {
-    if (Date.now() >= sheetClickSuppressUntil) return; // leftover listener — не блокируем
-    sheetClickSuppressUntil = 0;
-    e.stopPropagation();
-    e.preventDefault();
-  }, { capture: true, once: true });
+  // Хвост прошлого подавления на этом же контейнере снимаем до установки нового
+  const prev = sheetClickDrains.get(container);
+  if (prev) {
+    container.removeEventListener("click", prev, { capture: true });
+    sheetClickDrains.delete(container);
+  }
+  const drain = (e) => {
+    container.removeEventListener("click", drain, { capture: true });
+    sheetClickDrains.delete(container);
+    if (Date.now() < sheetClickSuppressUntil) {
+      sheetClickSuppressUntil = 0;
+      e.stopPropagation();
+      e.preventDefault();
+    }
+  };
+  sheetClickDrains.set(container, drain);
+  container.addEventListener("click", drain, { capture: true });
+  // Killswitch: листенер живёт не дольше 900 мс, даже если click не прилетел
+  setTimeout(() => {
+    container.removeEventListener("click", drain, { capture: true });
+    if (sheetClickDrains.get(container) === drain) sheetClickDrains.delete(container);
+  }, 900);
 }
 
 // Generic track list renderer (used by Search and Likes)
@@ -1342,6 +1361,10 @@ function openTrackSheet(track) {
 function closeTrackSheet() {
   trackSheet.classList.add("hidden");
   sheetTrack = null;
+  // Флаг подавления не должен переживать sheet: иначе первый легитимный тап
+  // по треку заглохнет, если после лонг-пресса пользователя закрыл sheet
+  // крестиком (click мимо контейнера списка, окно 800 мс оставалось живым).
+  sheetClickSuppressUntil = 0;
 }
 
 // «Следом»: в волне очередь ведёт Яндекс — не вставляем

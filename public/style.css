@@ -1247,7 +1247,9 @@ body {
 .track-sheet-wrap {
   position: fixed;
   inset: 0;
-  z-index: 110;
+  /* 90: ниже loginModal (100) — модалка входа по тапу сердца гостя
+     открывается ПОВЕРХ sheet'а и доступна */
+  z-index: 90;
   display: flex;
   align-items: flex-end;
   justify-content: center;
