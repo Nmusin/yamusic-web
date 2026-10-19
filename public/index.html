@@ -2,9 +2,13 @@
 <html lang="ru">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>Яндекс Музыка — Web Mod</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="theme-color" content="#121212">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="ЯМузыка">
+  <title>Яндекс Музыка — Web Mod</title>
   <link rel="stylesheet" href="style.css">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
 </head>
@@ -30,7 +34,7 @@
     <div id="guestWarningBanner" class="guest-banner">
       <div class="guest-banner-content">
         <i class="fa-solid fa-triangle-exclamation"></i>
-        <span>Без входа в аккаунт треки играют только 30 сек.</span>
+        <span>Без входа в аккаунт треки длятся 30 сек.</span>
       </div>
       <button id="bannerLoginBtn" class="banner-login-btn">Войти</button>
     </div>
@@ -98,8 +102,11 @@
           </div>
 
           <div class="wave-controls">
-            <button class="btn-circle btn-secondary" id="btnDislike" title="Пропустить трек">
-              <i class="fa-solid fa-forward-step"></i>
+            <button class="btn-circle btn-secondary" id="btnWavePlayPrev" title="Предыдущий">
+              <i class="fa-solid fa-backward-step"></i>
+            </button>
+            <button class="btn-circle btn-secondary" id="btnDislike" title="Не нравится / Пропустить">
+              <i class="fa-solid fa-thumbs-down"></i>
             </button>
             <button class="btn-circle btn-primary" id="btnWavePlay" title="Играть / Пауза">
               <i class="fa-solid fa-play" id="wavePlayIcon"></i>
@@ -107,6 +114,31 @@
             <button class="btn-circle btn-secondary" id="btnWaveNext" title="Следующий новый трек">
               <i class="fa-solid fa-shuffle"></i>
             </button>
+          </div>
+        </div>
+      </section>
+
+      <!-- Section: Liked Tracks -->
+      <section id="tab-likes" class="tab-content">
+        <div class="likes-screen">
+          <div class="likes-header-row">
+            <h3 id="likesTitle">Мне понравилось</h3>
+            <span id="likesCount" class="likes-count-badge"></span>
+            <button id="likesRefreshBtn" class="likes-refresh-btn" title="Обновить">
+              <i class="fa-solid fa-rotate-right"></i>
+            </button>
+          </div>
+
+          <div id="likesLoader" class="loader hidden">
+            <i class="fa-solid fa-circle-notch fa-spin"></i>
+            <p>Загружаем лайки...</p>
+          </div>
+
+          <div id="likesResults" class="track-list">
+            <div class="likes-empty-state">
+              <i class="fa-solid fa-heart"></i>
+              <p>Войдите в аккаунт, чтобы увидеть лайкнутые треки</p>
+            </div>
           </div>
         </div>
       </section>
@@ -149,17 +181,21 @@
             <div class="quality-options">
               <label class="radio-label">
                 <input type="radio" name="quality" value="lossless">
-                <span>FLAC (Lossless)</span>
+                <span>Lossless (фактически: если доступен, иначе AAC)</span>
               </label>
               <label class="radio-label">
                 <input type="radio" name="quality" value="nq" checked>
-                <span>Высокое (320 kbps)</span>
+                <span>Высокое — ~200 kbps AAC (лучший доступный)</span>
               </label>
               <label class="radio-label">
                 <input type="radio" name="quality" value="lq">
-                <span>Обычное (192 kbps)</span>
+                <span>Обычное — ~67 kbps HE-AAC (экономное)</span>
               </label>
             </div>
+            <button id="qualityTestBtn" class="quality-test-btn">
+              <i class="fa-solid fa-gauge-high"></i> Проверить, что реально отдаётся
+            </button>
+            <div id="qualityTestResult" class="quality-test-result hidden"></div>
           </div>
         </div>
       </section>
@@ -177,6 +213,9 @@
           <div class="mini-artist" id="miniArtist">—</div>
         </div>
         <div class="mini-actions">
+          <button id="miniPrevBtn" class="btn-icon" title="Предыдущий">
+            <i class="fa-solid fa-backward-step"></i>
+          </button>
           <button id="miniPlayBtn" class="btn-icon" title="Воспроизведение / Пауза">
             <i class="fa-solid fa-play" id="miniPlayIcon"></i>
           </button>
@@ -185,6 +224,7 @@
           </button>
         </div>
       </div>
+      <div class="mini-time" id="miniTime">0:00 / 0:00</div>
     </div>
 
     <!-- Bottom Navigation Bar -->
@@ -197,13 +237,17 @@
         <i class="fa-solid fa-magnifying-glass"></i>
         <span>Поиск</span>
       </button>
+      <button class="nav-btn" data-tab="tab-likes">
+        <i class="fa-solid fa-heart"></i>
+        <span>Лайки</span>
+      </button>
       <button class="nav-btn" data-tab="tab-settings">
         <i class="fa-solid fa-gear"></i>
         <span>Профиль</span>
       </button>
     </nav>
 
-    <!-- One-Click Device Login Modal -->
+    <!-- Multi-Method Login Modal -->
     <div id="loginModal" class="modal hidden">
       <div class="modal-backdrop" id="modalBackdrop"></div>
       <div class="modal-content">
@@ -211,41 +255,68 @@
           <h3>Вход в Яндекс Аккаунт</h3>
           <button id="closeModalBtn" class="modal-close"><i class="fa-solid fa-xmark"></i></button>
         </div>
+
+        <!-- Auth Tabs -->
+        <div class="modal-tabs">
+          <button class="modal-tab-btn active" data-auth="device">По коду (ya.ru)</button>
+          <button class="modal-tab-btn" data-auth="password">Логин и пароль</button>
+          <button class="modal-tab-btn" data-auth="token">Токен</button>
+        </div>
+
         <div class="modal-body">
-          <p class="modal-desc">
-            Для прослушивания треков <strong>целиком</strong> подтвердите вход. Наличие платного Плюса <strong>не требуется</strong> — мод откроет полный доступ бесплатно!
-          </p>
+          <!-- Tab 1: Device Code (Recommended) -->
+          <div id="authTabDevice" class="auth-subtab active">
+            <p class="modal-desc">
+              Откройте страницу Яндекса и подтвердите вход. Наличие платного Плюса <strong>не требуется</strong>!
+            </p>
 
-          <!-- Loading state for code -->
-          <div id="deviceCodeLoading" class="device-loading">
-            <i class="fa-solid fa-circle-notch fa-spin"></i>
-            <p>Генерация кода входа...</p>
-          </div>
-
-          <!-- Code container -->
-          <div id="deviceCodeContainer" class="device-code-box hidden">
-            <div class="code-label">Ваш одноразовый код:</div>
-            <div class="code-display" id="displayUserCode">--------</div>
-
-            <a id="openYaDeviceBtn" href="https://ya.ru/device" target="_blank" class="btn-ya-confirm">
-              <i class="fa-brands fa-yandex"></i> Подтвердить на ya.ru/device
-            </a>
-
-            <div class="polling-status">
+            <div id="deviceCodeLoading" class="device-loading">
               <i class="fa-solid fa-circle-notch fa-spin"></i>
-              <span>Ожидаем подтверждения в Яндексе...</span>
+              <p>Генерация кода...</p>
+            </div>
+
+            <div id="deviceCodeContainer" class="device-code-box hidden">
+              <div class="code-label">Ваш код подтверждения:</div>
+              <div class="code-display" id="displayUserCode">--------</div>
+
+              <div class="device-buttons-stack">
+                <a id="openYaDeviceBtn" href="https://ya.ru/device" target="_blank" class="btn-ya-confirm">
+                  <i class="fa-brands fa-yandex"></i> 1. Открыть ya.ru/device
+                </a>
+                <button id="checkConfirmedBtn" class="btn-check-confirmed">
+                  <i class="fa-solid fa-check"></i> 2. Я подтвердил(а) вход
+                </button>
+              </div>
+
+              <div class="polling-status">
+                <i class="fa-solid fa-circle-notch fa-spin"></i>
+                <span id="pollingStatusText">Ожидаем подтверждения в Яндексе...</span>
+              </div>
             </div>
           </div>
 
-          <!-- Manual Token Toggle -->
-          <div class="manual-toggle-row">
-            <button id="toggleManualTokenBtn" class="text-btn">Или ввести токен вручную</button>
+          <!-- Tab 2: Password Grant -->
+          <div id="authTabPassword" class="auth-subtab">
+            <p class="modal-desc">
+              Прямой вход через логин и пароль Яндекса (подходит для аккаунтов без 2FA).
+            </p>
+            <div class="form-group">
+              <input type="text" id="loginUsername" placeholder="Логин или email на Яндексе" autocomplete="username">
+            </div>
+            <div class="form-group">
+              <input type="password" id="loginPassword" placeholder="Пароль" autocomplete="current-password">
+            </div>
+            <button id="submitPasswordBtn" class="btn-accent btn-full">Войти</button>
           </div>
 
-          <div id="manualTokenBox" class="manual-token-box hidden">
+          <!-- Tab 3: Raw Token -->
+          <div id="authTabToken" class="auth-subtab">
+            <p class="modal-desc">
+              Если у вас уже есть токен или вы скопировали его из адресной строки:
+            </p>
             <div class="modal-input-group">
-              <input type="text" id="manualTokenInput" placeholder="Вставьте OAuth токен...">
-              <button id="confirmManualTokenBtn" class="btn-accent">Войти</button>
+              <input type="text" id="manualTokenInput" placeholder="Вставьте токен или ссылку...">
+              <button id="confirmManualTokenBtn" class="btn-accent">Сохранить</button>
             </div>
           </div>
 

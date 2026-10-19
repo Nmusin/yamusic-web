@@ -11,13 +11,19 @@ body {
   color: #ffffff;
   overflow: hidden;
   height: 100vh;
+  height: 100dvh; /* correct height on mobile (accounting for URL bar) */
   width: 100vw;
+  overscroll-behavior: none; /* no pull-to-refresh / bounce */
+  -webkit-user-select: none;
+  user-select: none;
+  touch-action: manipulation; /* no double-tap zoom delay */
 }
 
 .app-container {
   display: flex;
   flex-direction: column;
   height: 100vh;
+  height: 100dvh;
   max-width: 600px;
   margin: 0 auto;
   position: relative;
@@ -192,8 +198,10 @@ body {
 .content-area {
   flex: 1;
   overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
   position: relative;
-  padding-bottom: 130px;
+  padding-bottom: calc(140px + env(safe-area-inset-bottom, 0px));
 }
 
 .tab-content {
@@ -433,6 +441,129 @@ body {
   flex-shrink: 0;
 }
 
+/* Likes Screen */
+.likes-screen {
+  padding: 16px;
+}
+
+.likes-header-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.likes-header-row h3 {
+  font-size: 16px;
+  font-weight: 700;
+  color: #ffcc00;
+}
+
+.likes-count-badge {
+  font-size: 12px;
+  color: #888;
+  margin-left: auto;
+  margin-right: 10px;
+}
+
+.likes-refresh-btn {
+  background: transparent;
+  border: none;
+  color: #888;
+  font-size: 14px;
+  cursor: pointer;
+  padding: 6px;
+  transition: color 0.2s;
+}
+
+.likes-refresh-btn:active {
+  color: #ffcc00;
+}
+
+.likes-empty-state {
+  text-align: center;
+  padding: 50px 20px;
+  color: #666;
+}
+
+.likes-empty-state i {
+  font-size: 40px;
+  margin-bottom: 12px;
+  color: #ffcc00;
+  opacity: 0.4;
+}
+
+/* Quality test */
+.quality-test-btn {
+  margin-top: 12px;
+  width: 100%;
+  background: rgba(255, 204, 0, 0.12);
+  color: #ffcc00;
+  border: 1px solid rgba(255, 204, 0, 0.35);
+  font-weight: 700;
+  font-size: 13px;
+  padding: 10px;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.quality-test-btn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.quality-test-result {
+  margin-top: 10px;
+  font-size: 13px;
+  color: #ccc;
+}
+
+.qt-title {
+  color: #888;
+  margin-bottom: 8px;
+  font-size: 12px;
+}
+
+.qt-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 10px;
+  background: #141414;
+  border-radius: 8px;
+  margin-bottom: 6px;
+}
+
+.qt-q {
+  font-weight: 700;
+}
+
+.qt-q small {
+  color: #777;
+  font-weight: 400;
+  margin-left: 6px;
+}
+
+.qt-val {
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.qt-good {
+  color: #4caf50;
+}
+
+.qt-bad {
+  color: #ff5252;
+}
+
+.qt-error {
+  color: #ff5252;
+  font-size: 12px;
+}
+
 /* Settings / Profile Screen */
 .settings-screen {
   padding: 16px;
@@ -563,7 +694,7 @@ body {
 /* Mini Player */
 .mini-player {
   position: absolute;
-  bottom: 60px;
+  bottom: calc(60px + env(safe-area-inset-bottom, 0px) + 8px);
   left: 8px;
   right: 8px;
   background: rgba(26, 26, 26, 0.95);
@@ -628,7 +759,59 @@ body {
 
 .mini-actions {
   display: flex;
-  gap: 10px;
+  gap: 6px;
+}
+
+.mini-time {
+  text-align: center;
+  font-size: 10px;
+  color: #666;
+  padding: 0 0 6px 0;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Active track highlight in search results */
+.track-item.playing {
+  background: rgba(255, 204, 0, 0.12);
+  border: 1px solid rgba(255, 204, 0, 0.35);
+}
+
+.track-item.playing .track-title {
+  color: #ffcc00;
+}
+
+.track-duration {
+  font-size: 12px;
+  color: #666;
+  margin-right: 4px;
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Toast notification */
+#toast {
+  position: fixed;
+  left: 50%;
+  bottom: 140px;
+  transform: translateX(-50%) translateY(12px);
+  background: rgba(40, 40, 40, 0.95);
+  backdrop-filter: blur(10px);
+  color: #fff;
+  font-size: 13px;
+  padding: 9px 18px;
+  border-radius: 20px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.25s, transform 0.25s;
+  z-index: 200;
+  max-width: 85%;
+  text-align: center;
+}
+
+#toast.visible {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
 }
 
 .btn-icon {
@@ -649,7 +832,8 @@ body {
   bottom: 0;
   left: 0;
   right: 0;
-  height: 60px;
+  height: calc(60px + env(safe-area-inset-bottom, 0px));
+  padding-bottom: env(safe-area-inset-bottom, 0px);
   background: #141414;
   display: flex;
   justify-content: space-around;
@@ -835,6 +1019,94 @@ body {
   margin-top: 12px;
 }
 
+/* Auth sub-tabs inside login modal */
+.modal-tabs {
+  display: flex;
+  gap: 6px;
+  padding: 10px 16px 0 16px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.modal-tab-btn {
+  background: transparent;
+  border: none;
+  color: #777;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 10px 10px;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  white-space: nowrap;
+  transition: color 0.2s, border-color 0.2s;
+}
+
+.modal-tab-btn.active {
+  color: #ffcc00;
+  border-bottom-color: #ffcc00;
+}
+
+.auth-subtab {
+  display: none;
+}
+
+.auth-subtab.active {
+  display: block;
+}
+
+.form-group {
+  margin-bottom: 12px;
+}
+
+.form-group input {
+  width: 100%;
+  background: #2a2a2a;
+  border: 1px solid #3c3c3c;
+  border-radius: 8px;
+  padding: 11px 12px;
+  color: #fff;
+  font-size: 14px;
+  outline: none;
+  transition: border-color 0.2s;
+}
+
+.form-group input:focus {
+  border-color: #ffcc00;
+}
+
+.btn-full {
+  width: 100%;
+  padding: 11px;
+  font-size: 14px;
+}
+
+.btn-full:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.btn-check-confirmed {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  background: rgba(255, 255, 255, 0.08);
+  color: #fff;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  font-weight: 600;
+  font-size: 14px;
+  padding: 11px 20px;
+  border-radius: 10px;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.btn-check-confirmed:active {
+  background: rgba(255, 255, 255, 0.15);
+}
+
 .modal-input-group {
   display: flex;
   gap: 8px;
@@ -878,4 +1150,101 @@ body {
 
 .hidden {
   display: none !important;
+}
+
+/* ===== Mobile adaptation ===== */
+
+/* Inputs: 16px prevents iOS auto-zoom on focus */
+.search-bar-wrapper input,
+.form-group input,
+.modal-input-group input {
+  font-size: 16px;
+}
+
+.form-group input,
+.modal-input-group input {
+  min-height: 44px; /* comfortable touch targets */
+}
+
+/* Compact devices (small width, e.g. 360px and less) */
+@media (max-width: 380px) {
+  .wave-circle {
+    width: 180px;
+    height: 180px;
+  }
+  .wave-placeholder {
+    font-size: 52px;
+  }
+  .btn-primary {
+    width: 58px;
+    height: 58px;
+    font-size: 20px;
+  }
+  .btn-secondary {
+    width: 44px;
+    height: 44px;
+    font-size: 16px;
+  }
+  .wave-controls {
+    gap: 16px;
+  }
+  .logo span {
+    font-size: 15px;
+  }
+  .nav-btn span {
+    font-size: 10px;
+  }
+}
+
+/* Landscape phones: compact vertical layout */
+@media (max-height: 430px) and (orientation: landscape) {
+  .wave-screen {
+    flex-direction: row;
+    gap: 20px;
+    text-align: left;
+    justify-content: space-around;
+  }
+  .wave-circle {
+    width: 150px;
+    height: 150px;
+    margin: 0;
+  }
+  .wave-visual-container {
+    margin: 0;
+    flex-shrink: 0;
+  }
+  .wave-info {
+    margin-bottom: 0;
+  }
+  .global-search-container {
+    padding: 4px 16px;
+  }
+  .quick-tags {
+    display: none;
+  }
+}
+
+/* Phones in portrait with short screens */
+@media (max-height: 620px) and (orientation: portrait) {
+  .wave-circle {
+    width: 170px;
+    height: 170px;
+    margin: 10px 0;
+  }
+  .wave-visual-container {
+    margin: 10px 0;
+  }
+}
+
+/* Desktop / tablets: don't stretch, add outer glow */
+@media (min-width: 600px) {
+  body {
+    display: flex;
+    align-items: center;
+  }
+  .app-container {
+    height: min(100dvh, 950px);
+    border-radius: 18px;
+    overflow: hidden;
+  }
 }

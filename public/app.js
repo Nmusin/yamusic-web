@@ -13,7 +13,33 @@ let currentUser = null;
 let pollInterval = null;
 
 let quality = localStorage.getItem("ym_quality") || "nq";
-let oauthToken = localStorage.getItem("ym_token") || "";
+let oauthToken = getToken();
+let cachedUserStr = localStorage.getItem("ym_user");
+
+// --- Token persistence: localStorage + cookie fallback ---
+// (iOS Safari can wipe localStorage, the cookie survives)
+function setCookie(name, value, days) {
+  document.cookie = `${name}=${encodeURIComponent(value)}; Path=/; Max-Age=${days * 86400}; SameSite=Lax`;
+}
+function readCookie(name) {
+  const match = document.cookie.match(new RegExp("(?:^|; )" + name + "=([^;]*)"));
+  return match ? decodeURIComponent(match[1]) : null;
+}
+function getToken() {
+  return localStorage.getItem("ym_token") || readCookie("ym_token") || "";
+}
+function saveToken(token) {
+  try { localStorage.setItem("ym_token", token); } catch (e) {}
+  setCookie("ym_token", token, 365); // keep for a year
+}
+function clearToken() {
+  try { localStorage.removeItem("ym_token"); } catch (e) {}
+  setCookie("ym_token", "", 0);
+  try { localStorage.removeItem("ym_user"); } catch (e) {}
+}
+function saveUser(user) {
+  try { localStorage.setItem("ym_user", JSON.stringify(user)); } catch (e) {}
+}
 
 // UI Elements - Wave
 const waveBtn = document.getElementById("waveBtn");
@@ -26,6 +52,7 @@ const waveNextTitle = document.getElementById("waveNextTitle");
 const wavePlayIcon = document.getElementById("wavePlayIcon");
 const btnWavePlay = document.getElementById("btnWavePlay");
 const btnWaveNext = document.getElementById("btnWaveNext");
+const btnWavePlayPrev = document.getElementById("btnWavePlayPrev");
 const btnDislike = document.getElementById("btnDislike");
 
 // UI Elements - MiniPlayer
@@ -36,8 +63,10 @@ const miniArtist = document.getElementById("miniArtist");
 const miniPlayBtn = document.getElementById("miniPlayBtn");
 const miniPlayIcon = document.getElementById("miniPlayIcon");
 const miniNextBtn = document.getElementById("miniNextBtn");
+const miniPrevBtn = document.getElementById("miniPrevBtn");
 const miniProgressBar = document.getElementById("miniProgressBar");
 const miniProgressFill = document.getElementById("miniProgressFill");
+const miniTime = document.getElementById("miniTime");
 
 // UI Elements - Search
 const searchInput = document.getElementById("searchInput");
@@ -45,7 +74,13 @@ const searchClearBtn = document.getElementById("searchClearBtn");
 const searchLoader = document.getElementById("searchLoader");
 const searchResults = document.getElementById("searchResults");
 const searchCount = document.getElementById("searchCount");
-const headerSearchBtn = document.getElementById("headerSearchBtn");
+
+// UI Elements - Likes
+const likesScreen = document.getElementById("tab-likes");
+const likesResults = document.getElementById("likesResults");
+const likesLoader = document.getElementById("likesLoader");
+const likesCount = document.getElementById("likesCount");
+const likesRefreshBtn = document.getElementById("likesRefreshBtn");
 
 // UI Elements - Auth & Profile
 const authBtn = document.getElementById("authBtn");
@@ -67,11 +102,20 @@ const deviceCodeLoading = document.getElementById("deviceCodeLoading");
 const deviceCodeContainer = document.getElementById("deviceCodeContainer");
 const displayUserCode = document.getElementById("displayUserCode");
 const openYaDeviceBtn = document.getElementById("openYaDeviceBtn");
-const toggleManualTokenBtn = document.getElementById("toggleManualTokenBtn");
-const manualTokenBox = document.getElementById("manualTokenBox");
+const pollingStatusText = document.getElementById("pollingStatusText");
+const checkConfirmedBtn = document.getElementById("checkConfirmedBtn");
 const manualTokenInput = document.getElementById("manualTokenInput");
 const confirmManualTokenBtn = document.getElementById("confirmManualTokenBtn");
 const loginError = document.getElementById("loginError");
+
+// Modal Auth Tabs (device / password / token)
+const modalTabBtns = document.querySelectorAll(".modal-tab-btn");
+const authTabDevice = document.getElementById("authTabDevice");
+const authTabPassword = document.getElementById("authTabPassword");
+const authTabToken = document.getElementById("authTabToken");
+const loginUsername = document.getElementById("loginUsername");
+const loginPassword = document.getElementById("loginPassword");
+const submitPasswordBtn = document.getElementById("submitPasswordBtn");
 
 // Initialize Quality settings
 const qualityRadio = document.querySelector(`input[name="quality"][value="${quality}"]`);
@@ -88,14 +132,43 @@ document.querySelectorAll('input[name="quality"]').forEach((radio) => {
   });
 });
 
+// Update Track Time Display (e.g. "1:23 / 3:45")
+function showTime() {
+  if (!miniTime) return;
+  const fmt = (t) => {
+    if (!isFinite(t)) return "0:00";
+    const m = Math.floor(t / 60);
+    const s = Math.floor(t % 60);
+    return `${m}:${String(s).padStart(2, "0")}`;
+  };
+  miniTime.textContent = `${fmt(audio.currentTime)} / ${fmt(audio.duration)}`;
+}
+
+// Small toast notification (instead of alert)
+let toastTimer = null;
+function toast(msg) {
+  if (!toastTimer) {
+    const el = document.createElement("div");
+    el.id = "toast";
+    document.body.appendChild(el);
+    toastTimer = el;
+  }
+  toastTimer.textContent = msg;
+  toastTimer.classList.add("visible");
+  clearTimeout(toast._t);
+  toast._t = setTimeout(() => {
+    if (toastTimer) toastTimer.classList.remove("visible");
+  }, 2500);
+}
+
 // Modal Open / Close & Device Code Flow
 async function openLoginModal() {
   loginModal.classList.remove("hidden");
   deviceCodeLoading.classList.remove("hidden");
   deviceCodeContainer.classList.add("hidden");
   loginError.classList.add("hidden");
-  manualTokenBox.classList.add("hidden");
   stopPolling();
+  switchAuthTab("device");
 
   try {
     const res = await fetch("/api/auth/device-code");
@@ -107,7 +180,8 @@ async function openLoginModal() {
       deviceCodeLoading.classList.add("hidden");
       deviceCodeContainer.classList.remove("hidden");
 
-      // Start Polling for confirmation
+      // Save for the "Я подтвердил вход" button, start background polling
+      lastDeviceCode = data.deviceCode;
       startPolling(data.deviceCode, data.interval || 3);
     } else {
       deviceCodeLoading.classList.add("hidden");
@@ -153,25 +227,37 @@ function stopPolling() {
 
 async function onLoginSuccess(token) {
   oauthToken = token;
-  localStorage.setItem("ym_token", token);
+  saveToken(token);
 
-  const res = await fetch(`/api/account?token=${encodeURIComponent(token)}`);
-  const data = await res.json();
+  try {
+    const res = await fetch(`/api/account?token=${encodeURIComponent(token)}`);
+    const data = await res.json();
 
-  if (data.loggedIn && data.user) {
-    currentUser = data.user;
-    updateAuthUI(true);
-    closeLoginModal();
-
-    alert(`Добро пожаловать, ${data.user.fullName || data.user.login}! Все треки разблокированы без ограничений.`);
-
-    // If currently playing 30s preview, restart full track
-    if (currentTrack) {
-      playTrack(currentTrack, audio.currentTime);
+    if (data.loggedIn && data.user) {
+      currentUser = data.user;
+      saveUser(data.user);
+      updateAuthUI(true);
+      closeLoginModal();
+      toast(`Добро пожаловать, ${data.user.fullName || data.user.login}!`);
+    } else {
+      // Token valid at OAuth but account info unavailable — still let user in
+      currentUser = { login: "profile", fullName: "Профиль" };
+      updateAuthUI(true);
+      closeLoginModal();
     }
-  } else {
+  } catch (e) {
+    currentUser = { login: "profile", fullName: "Профиль" };
     updateAuthUI(true);
     closeLoginModal();
+  }
+
+  // Refresh likes after login
+  likesLoaded = false;
+  if (likesScreen.classList.contains("active")) loadLikes(true);
+
+  // If currently playing 30s preview, restart full track
+  if (currentTrack) {
+    playTrack(currentTrack, audio.currentTime);
   }
 }
 
@@ -192,13 +278,7 @@ settingsLoginBtn.addEventListener("click", openLoginModal);
 closeModalBtn.addEventListener("click", closeLoginModal);
 modalBackdrop.addEventListener("click", closeLoginModal);
 
-toggleManualTokenBtn.addEventListener("click", () => {
-  manualTokenBox.classList.toggle("hidden");
-  if (!manualTokenBox.classList.contains("hidden")) {
-    manualTokenInput.focus();
-  }
-});
-
+// --- Manual Token Tab ---
 confirmManualTokenBtn.addEventListener("click", () => {
   let token = manualTokenInput.value.trim();
   const match = token.match(/access_token=([^&]+)/);
@@ -210,14 +290,100 @@ confirmManualTokenBtn.addEventListener("click", () => {
   }
   onLoginSuccess(token);
 });
+manualTokenInput.addEventListener("keydown", (e) => {
+  if (e.key === "Enter") confirmManualTokenBtn.click();
+});
+
+// --- Password Tab ---
+async function submitPasswordLogin() {
+  const username = loginUsername.value.trim();
+  const password = loginPassword.value;
+
+  if (!username || !password) {
+    showLoginError("Укажите логин и пароль");
+    return;
+  }
+
+  submitPasswordBtn.disabled = true;
+  submitPasswordBtn.textContent = "Входим...";
+  loginError.classList.add("hidden");
+
+  try {
+    const res = await fetch("/api/auth/password", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ username, password }),
+    });
+    const data = await res.json();
+
+    if (data.ok && data.accessToken) {
+      onLoginSuccess(data.accessToken);
+    } else {
+      showLoginError(data.error || "Ошибка авторизации");
+    }
+  } catch (e) {
+    showLoginError("Ошибка сети: " + e.message);
+  } finally {
+    submitPasswordBtn.disabled = false;
+    submitPasswordBtn.textContent = "Войти";
+  }
+}
+submitPasswordBtn.addEventListener("click", submitPasswordLogin);
+loginPassword.addEventListener("keydown", (e) => {
+  if (e.key === "Enter") submitPasswordLogin();
+});
+
+// --- Modal Tab Switching (device / password / token) ---
+function switchAuthTab(name) {
+  const map = {
+    device: [authTabDevice, "auth-device"],
+    password: [authTabPassword, "auth-password"],
+    token: [authTabToken, "auth-token"],
+  };
+  modalTabBtns.forEach((b) => b.classList.toggle("active", b.getAttribute("data-auth") === name));
+  Object.entries(map).forEach(([key, [el]]) => {
+    if (el) el.classList.toggle("active", key === name);
+  });
+  loginError.classList.add("hidden");
+}
+modalTabBtns.forEach((btn) => {
+  btn.addEventListener("click", () => switchAuthTab(btn.getAttribute("data-auth")));
+});
+
+// --- "Я подтвердил вход" — force immediate token check ---
+let lastDeviceCode = null;
+checkConfirmedBtn.addEventListener("click", async () => {
+  if (!lastDeviceCode) return;
+  pollingStatusText.textContent = "Проверяем...";
+  try {
+    const res = await fetch(`/api/auth/device-token?deviceCode=${encodeURIComponent(lastDeviceCode)}`);
+    const data = await res.json();
+    if (data.status === "success" && data.accessToken) {
+      stopPolling();
+      onLoginSuccess(data.accessToken);
+    } else if (data.status === "pending") {
+      pollingStatusText.textContent = "Ещё не подтверждено — проверьте ya.ru/device";
+    } else {
+      stopPolling();
+      showLoginError("Ошибка авторизации: " + (data.error || "код истёк"));
+    }
+  } catch (e) {
+    pollingStatusText.textContent = "Ошибка сети";
+  }
+});
 
 // Logout
 settingsLogoutBtn.addEventListener("click", () => {
   if (confirm("Вы действительно хотите выйти из аккаунта?")) {
     oauthToken = "";
     currentUser = null;
-    localStorage.removeItem("ym_token");
+    clearToken();
     updateAuthUI(false);
+    // Reset likes tab to the logged-out state
+    likesData = [];
+    likesLoaded = false;
+    showLikesEmpty("Войдите в аккаунт, чтобы увидеть лайкнутые треки");
+    likesCount.textContent = "";
   }
 });
 
@@ -259,17 +425,32 @@ function updateAuthUI(isLoggedIn) {
 
 // Check initial token on startup
 if (oauthToken) {
+  // Render cached profile instantly (no waiting for network)
+  if (cachedUserStr) {
+    try {
+      currentUser = JSON.parse(cachedUserStr);
+      updateAuthUI(true);
+    } catch (e) {}
+  }
+
+  // Re-validate the token in the background
   fetch(`/api/account?token=${encodeURIComponent(oauthToken)}`)
     .then((r) => r.json())
     .then((data) => {
       if (data.loggedIn && data.user) {
         currentUser = data.user;
+        saveUser(data.user);
         updateAuthUI(true);
       } else {
+        currentUser = null;
+        clearToken();
         updateAuthUI(false);
+        toast("Сессия истекла, войдите заново");
       }
     })
-    .catch(() => updateAuthUI(false));
+    .catch(() => {
+      // Network error — keep cached session, don't log the user out
+    });
 } else {
   updateAuthUI(false);
 }
@@ -286,18 +467,51 @@ function switchTab(tabId) {
 
 document.querySelectorAll(".nav-btn").forEach((btn) => {
   btn.addEventListener("click", () => {
-    switchTab(btn.getAttribute("data-tab"));
+    const tabId = btn.getAttribute("data-tab");
+    switchTab(tabId);
+    // Load likes lazily on first open
+    if (tabId === "tab-likes") loadLikes();
   });
 });
 
-headerSearchBtn.addEventListener("click", () => {
-  switchTab("tab-search");
-  searchInput.focus();
+// Spacebar play/pause (except when typing in inputs)
+document.addEventListener("keydown", (e) => {
+  const tag = (e.target.tagName || "").toLowerCase();
+  if (tag === "input" || tag === "textarea" || loginModal.classList.contains("hidden") === false) return;
+  if (e.code === "Space") {
+    e.preventDefault();
+    togglePlayPause();
+  }
 });
 
 // Play Track
+let pendingSeek = 0;
+let consecutiveErrors = 0;
+
+async function sendRotorFeedback(type) {
+  if (!radioSessionId || !currentTrack) return;
+  try {
+    await fetch(
+      `/api/rotor/feedback${oauthToken ? `?token=${encodeURIComponent(oauthToken)}` : ""}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          station: "user:onyourwave",
+          type,
+          trackId: String(currentTrack.id),
+          from: type === "radioStarted" ? "web-mod" : undefined,
+        }),
+      }
+    );
+  } catch (e) {
+    console.warn("Rotor feedback failed:", e);
+  }
+}
+
 function playTrack(track, seekTo = 0) {
   if (!track) return;
+  const isWaveTrack = !!radioSessionId;
   currentTrack = track;
   playedTrackIds.add(String(track.id));
 
@@ -305,13 +519,22 @@ function playTrack(track, seekTo = 0) {
   let streamUrl = `/api/stream?id=${encodeURIComponent(track.id)}&quality=${quality}`;
   if (oauthToken) streamUrl += `&token=${encodeURIComponent(oauthToken)}`;
 
+  // currentTime can only be set after metadata is loaded
+  pendingSeek = seekTo || 0;
   audio.src = streamUrl;
-  audio.currentTime = seekTo;
+  if (pendingSeek > 0) {
+    audio.addEventListener("loadedmetadata", () => {
+      try { audio.currentTime = pendingSeek; } catch (e) {}
+    }, { once: true });
+  }
   audio.play().catch((e) => console.log("Playback error:", e));
 
   updateTrackUI(track);
   updateMediaSession(track);
   updateNextPreview();
+
+  // Tell Yandex the track started so the Wave session stays alive
+  if (isWaveTrack) sendRotorFeedback("trackStarted");
 
   // If running low on tracks in wave, proactively fetch more
   if (radioSessionId && queue.length - queueIndex <= 2) {
@@ -336,6 +559,15 @@ function updateTrackUI(track) {
   miniTitle.textContent = track.title;
   miniArtist.textContent = track.artists;
   miniCover.src = track.coverUri || "";
+
+  // Highlight currently playing track in the search list
+  document.querySelectorAll(".track-item.playing").forEach((el) => el.classList.remove("playing"));
+  const activeItem = document.querySelector(`.track-item[data-track-id="${CSS.escape(String(track.id))}"]`);
+  if (activeItem) {
+    activeItem.classList.add("playing");
+    const icon = activeItem.querySelector(".track-play-btn i");
+    if (icon) icon.className = "fa-solid fa-pause";
+  }
 }
 
 function updateNextPreview() {
@@ -362,13 +594,28 @@ function setPlayState(playing) {
 }
 
 // Audio Element Events
-audio.addEventListener("play", () => setPlayState(true));
+audio.addEventListener("play", () => { consecutiveErrors = 0; setPlayState(true); });
 audio.addEventListener("pause", () => setPlayState(false));
+audio.addEventListener("loadedmetadata", () => showTime());
 audio.addEventListener("timeupdate", () => {
   if (audio.duration) {
     const percent = (audio.currentTime / audio.duration) * 100;
     miniProgressFill.style.width = percent + "%";
+    showTime();
   }
+});
+// Auto-skip broken streams, but never loop endlessly on a broken connection
+audio.addEventListener("error", () => {
+  if (!currentTrack) return;
+  consecutiveErrors++;
+  if (consecutiveErrors >= 5) {
+    toast("Ошибка воспроизведения, остановлено");
+    audio.pause();
+    consecutiveErrors = 0;
+    return;
+  }
+  toast("Трек недоступен, пропускаем...");
+  setTimeout(playNext, 600);
 });
 audio.addEventListener("ended", () => {
   playNext();
@@ -387,7 +634,18 @@ function togglePlayPause() {
   }
 }
 
+function playPrev() {
+  if (queueIndex > 0) {
+    queueIndex--;
+    playTrack(queue[queueIndex]);
+  } else if (audio.currentTime > 3) {
+    // Restart current track like real players do
+    audio.currentTime = 0;
+  }
+}
+
 async function playNext() {
+  if (radioSessionId && currentTrack) sendRotorFeedback("skip");
   if (queueIndex < queue.length - 1) {
     queueIndex++;
     playTrack(queue[queueIndex]);
@@ -413,6 +671,8 @@ waveBtn.addEventListener("click", togglePlayPause);
 miniPlayBtn.addEventListener("click", togglePlayPause);
 btnWaveNext.addEventListener("click", playNext);
 miniNextBtn.addEventListener("click", playNext);
+btnWavePlayPrev.addEventListener("click", playPrev);
+miniPrevBtn.addEventListener("click", playPrev);
 btnDislike.addEventListener("click", playNext);
 
 miniProgressBar.addEventListener("click", (e) => {
@@ -442,6 +702,20 @@ async function startWave() {
       const freshTracks = data.tracks.filter((t) => !playedTrackIds.has(String(t.id)));
       queue = freshTracks.length > 0 ? freshTracks : data.tracks;
       queueIndex = 0;
+      // Inform the rotor that a new radio session has begun
+      if (radioSessionId) {
+        try {
+          await fetch(
+            `/api/rotor/feedback${oauthToken ? `?token=${encodeURIComponent(oauthToken)}` : ""}`,
+            {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ station: "user:onyourwave", type: "radioStarted", from: "web-mod" }),
+            }
+          );
+        } catch (e) {}
+      }
+      // playTrack() itself sends "trackStarted" because radioSessionId is set
       playTrack(queue[0]);
     } else {
       waveTrackTitle.textContent = "Ошибка загрузки";
@@ -550,42 +824,170 @@ document.querySelectorAll(".tag-chip").forEach((chip) => {
   });
 });
 
-function renderSearchResults(tracks) {
-  searchResults.innerHTML = "";
-  searchCount.textContent = tracks.length > 0 ? `${tracks.length} найдено` : "";
+function formatDuration(ms) {
+  if (!ms) return "";
+  return `${Math.floor(ms / 60000)}:${String(Math.floor((ms % 60000) / 1000)).padStart(2, "0")}`;
+}
+
+// Safe cover placeholder (SVG data URI)
+const FALLBACK_COVER = "data:image/svg+xml," + encodeURIComponent(
+  '<svg xmlns="http://www.w3.org/2000/svg" width="48" height="48"><rect width="48" height="48" fill="#2a2a2a"/><text x="24" y="30" font-size="20" text-anchor="middle" fill="#555">♪</text></svg>'
+);
+
+// Generic track list renderer (used by Search and Likes)
+function renderTrackList(tracks, container, countEl, countLabel) {
+  container.innerHTML = "";
+  if (countEl) countEl.textContent = tracks.length > 0 ? `${countLabel || ""} ${tracks.length}`.trim() : "";
 
   if (tracks.length === 0) {
-    searchResults.innerHTML = '<p style="text-align:center; color:#777; padding:40px;">Ничего не найдено</p>';
+    container.innerHTML = '<p style="text-align:center; color:#777; padding:40px;">Ничего не найдено</p>';
     return;
   }
 
   tracks.forEach((track, index) => {
+    // Build DOM safely — no innerHTML with user data (XSS)
     const item = document.createElement("div");
     item.className = "track-item";
-    const duration = track.durationMs
-      ? `${Math.floor(track.durationMs / 60000)}:${String(Math.floor((track.durationMs % 60000) / 1000)).padStart(2, "0")}`
-      : "";
+    item.dataset.trackId = String(track.id);
 
-    item.innerHTML = `
-      <img src="${track.coverUri || 'data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22/>'}" alt="cover">
-      <div class="track-info">
-        <div class="track-title">${track.title}</div>
-        <div class="track-artist">${track.artists} ${track.album ? '• ' + track.album : ''}</div>
-      </div>
-      ${duration ? `<span style="font-size:12px; color:#666; margin-right:8px;">${duration}</span>` : ''}
-      <button class="track-play-btn" title="Слушать">
-        <i class="fa-solid fa-play"></i>
-      </button>
-    `;
+    const cover = document.createElement("img");
+    cover.src = track.coverUri || FALLBACK_COVER;
+    cover.alt = "cover";
+    cover.onerror = () => { cover.src = FALLBACK_COVER; };
+
+    const info = document.createElement("div");
+    info.className = "track-info";
+    const titleEl = document.createElement("div");
+    titleEl.className = "track-title";
+    titleEl.textContent = track.title;
+    const artistEl = document.createElement("div");
+    artistEl.className = "track-artist";
+    artistEl.textContent = track.artists + (track.album ? " • " + track.album : "");
+    info.append(titleEl, artistEl);
+
+    const duration = document.createElement("span");
+    duration.className = "track-duration";
+    duration.textContent = formatDuration(track.durationMs);
+
+    const playBtn = document.createElement("button");
+    playBtn.className = "track-play-btn";
+    playBtn.title = "Слушать";
+    playBtn.innerHTML = '<i class="fa-solid fa-play"></i>';
+
+    item.append(cover, info, duration, playBtn);
     item.addEventListener("click", () => {
       radioSessionId = null;
       queue = tracks;
       queueIndex = index;
       playTrack(track);
+      if (container === searchResults) switchTab("tab-search");
     });
-    searchResults.appendChild(item);
+    container.appendChild(item);
+
+    // Mark the track that is already playing in this session
+    if (currentTrack && String(currentTrack.id) === String(track.id)) item.classList.add("playing");
   });
 }
+
+function renderSearchResults(tracks) {
+  renderTrackList(tracks, searchResults, searchCount, "");
+}
+
+// --- Liked Tracks Tab ---
+let likesData = [];
+let likesLoaded = false;
+let likesLoading = false;
+
+function showLikesEmpty(msg, icon) {
+  likesResults.innerHTML = `
+    <div class="likes-empty-state">
+      <i class="fa-solid fa-heart${icon === "broken" ? "-crack" : ""}"></i>
+      <p>${msg}</p>
+    </div>`;
+}
+
+async function loadLikes(force = false) {
+  if (likesLoading) return;
+  if (likesLoaded && !force) return;
+
+  if (!oauthToken) {
+    showLikesEmpty("Войдите в аккаунт, чтобы увидеть лайкнутые треки");
+    return;
+  }
+
+  likesLoading = true;
+  likesLoader.classList.remove("hidden");
+  likesResults.innerHTML = "";
+
+  try {
+    const res = await fetch(`/api/likes?token=${encodeURIComponent(oauthToken)}`);
+    const data = await res.json();
+
+    if (data.guest) {
+      likesLoaded = false;
+      showLikesEmpty("Токен недействителен — войдите заново", "broken");
+    } else {
+      likesData = data.tracks || [];
+      likesLoaded = true;
+      if (likesData.length > 0) {
+        renderTrackList(likesData, likesResults, likesCount, "");
+      } else {
+        showLikesEmpty("Пока пусто — лайкайте треки в приложении Яндекс Музыки");
+      }
+    }
+  } catch (e) {
+    showLikesEmpty("Ошибка загрузки: " + e.message, "broken");
+  } finally {
+    likesLoading = false;
+    likesLoader.classList.add("hidden");
+  }
+}
+
+likesRefreshBtn.addEventListener("click", () => loadLikes(true));
+
+// --- Quality Test ---
+const qualityTestBtn = document.getElementById("qualityTestBtn");
+const qualityTestResult = document.getElementById("qualityTestResult");
+
+qualityTestBtn.addEventListener("click", async () => {
+  qualityTestBtn.disabled = true;
+  qualityTestResult.classList.remove("hidden");
+  qualityTestResult.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin"></i> Замеряем битрейт...';
+  try {
+    const params = new URLSearchParams();
+    if (oauthToken) params.set("token", oauthToken);
+    if (currentTrack) {
+      params.set("id", currentTrack.id);
+      if (currentTrack.durationMs) params.set("durationMs", currentTrack.durationMs);
+    }
+    const res = await fetch(`/api/quality-test?${params.toString()}`);
+    const data = await res.json();
+
+    if (data.error) {
+      qualityTestResult.innerHTML = `<div class="qt-error">${data.error}</div>`;
+    } else {
+      const rows = (data.results || [])
+        .map((r) => {
+          if (r.error) {
+            return `<div class="qt-row"><div class="qt-q">${r.quality}</div><div class="qt-val qt-bad">✗ ${r.error}</div></div>`;
+          }
+          const kb = r.kbps ? `${r.kbps} kbps` : "—";
+          const mb = r.sizeMb ? `${r.sizeMb} МБ` : "";
+          const bad = r.preview ? "qt-bad" : (r.kbps && r.kbps < 100 ? "qt-bad" : "qt-good");
+          return `<div class="qt-row">
+            <div class="qt-q">${r.quality} <small>${r.codec || ""}</small></div>
+            <div class="qt-val ${bad}">${kb} ${mb} ${r.preview ? "ПРЕВЬЮ!" : ""}</div>
+          </div>`;
+        })
+        .join("");
+      qualityTestResult.innerHTML = `<div class="qt-title">Трек ${data.track}, длительность ${Math.round(data.durationMs / 1000)} c:</div>${rows}`;
+    }
+  } catch (e) {
+    qualityTestResult.innerHTML = `<div class="qt-error">${e.message}</div>`;
+  } finally {
+    qualityTestBtn.disabled = false;
+  }
+});
 
 // Android Lockscreen & Headset controls via MediaSession API
 function updateMediaSession(track) {
@@ -600,6 +1002,7 @@ function updateMediaSession(track) {
     navigator.mediaSession.setActionHandler("play", () => audio.play());
     navigator.mediaSession.setActionHandler("pause", () => audio.pause());
     navigator.mediaSession.setActionHandler("nexttrack", () => playNext());
+    navigator.mediaSession.setActionHandler("previoustrack", () => playPrev());
     navigator.mediaSession.setActionHandler("seekto", (details) => {
       if (details.seekTime) audio.currentTime = details.seekTime;
     });

@@ -1,0 +1,19 @@
+# Environment and personal data are NEVER committed here
+*.log
+.env
+.env.*
+!.env.example
+
+# Node
+node_modules/
+package-lock.json
+
+# OS / editor junk
+.DS_Store
+Thumbs.db
+*.swp
+
+# Secret/debug files in case someone drops them in
+*token.txt
+*token.json
+diagnostic*.txt
