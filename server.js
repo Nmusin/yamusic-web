@@ -131,9 +131,64 @@ function parseBody(req) {
   });
 }
 
+// --- Generic in-memory cache for Yandex API GET responses ---
+// Entries are keyed by (token hash | request URL) so different accounts never mix.
+// TTLs are per call; caches are invalidated explicitly when data changes (likes).
+const API_CACHE_LIMIT = 400;
+const apiCache = new Map(); // key -> { resp: {status, data}, ts, hits }
+const ACCOUNT_CACHE_TTL = 10 * 60 * 1000; // account/about rarely changes
+const accInfoCache = new Map(); // tokenHash -> { info, ts }
+
+function tokenHash(token) {
+  return crypto.createHash("sha256").update(String(token)).digest("hex").slice(0, 12);
+}
+
+async function yandexCached(url, token, ttlMs) {
+  const key = `${tokenHash(token)}|${url}`;
+  const now = Date.now();
+  const hit = apiCache.get(key);
+  if (hit && now - hit.ts < ttlMs) {
+    hit.hits++;
+    return { status: hit.resp.status, data: hit.resp.data, cached: true };
+  }
+  const resp = await yandexRequest(url, token);
+  if (resp.status === 200 && resp.data) {
+    apiCache.set(key, { resp: { status: resp.status, data: resp.data }, ts: now, hits: 0 });
+    if (apiCache.size > API_CACHE_LIMIT) {
+      const oldest = apiCache.keys().next().value;
+      apiCache.delete(oldest);
+    }
+  }
+  return resp;
+}
+
+// Drop cached URLs containing `fragment` (e.g. "/likes/tracks" after a successful like)
+function invalidateApiCache(fragment) {
+  let n = 0;
+  for (const k of Array.from(apiCache.keys())) {
+    if (k.includes(fragment)) {
+      apiCache.delete(k);
+      n++;
+    }
+  }
+  return n;
+}
+
+function cacheStats() {
+  let hits = 0;
+  for (const v of apiCache.values()) hits += v.hits || 0;
+  return { entries: apiCache.size, totalHits: hits, limit: API_CACHE_LIMIT };
+}
+
 // Resolve Yandex account info from a token. Tries /account/about, then /account/status.
 // Handles both nested ({result:{account:{uid}}}) and flat ({result:{uid}}) shapes.
 async function getAccountInfo(token) {
+  // Cached per token: every UI request normally resolves the account; /account/about is slow.
+  const tHash = tokenHash(token);
+  const cachedInfo = accInfoCache.get(tHash);
+  if (cachedInfo && Date.now() - cachedInfo.ts < ACCOUNT_CACHE_TTL) {
+    return cachedInfo.info;
+  }
   const endpoints = [
     "https://api.music.yandex.net/account/about",
     "https://api.music.yandex.net/account/status",
@@ -146,7 +201,7 @@ async function getAccountInfo(token) {
     if (resp.status === 200 && uid) {
       const avatarRaw = r.avatarUrl || account.avatarUrl;
       const hasPlus = !!(r.plus?.has_plus || account.plus?.has_plus);
-      return {
+      const result = {
         loggedIn: true,
         user: {
           uid,
@@ -156,6 +211,8 @@ async function getAccountInfo(token) {
           hasPlus, // real subscription status
         },
       };
+      accInfoCache.set(tHash, { info: result, ts: Date.now() });
+      return result;
     }
     console.log(`[AUTH] ${ep} responded ${resp.status}, keys:`, JSON.stringify(Object.keys(r)).slice(0, 200));
   }
@@ -326,6 +383,13 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  // --- API: cache diagnostics ---
+  if (pathname === "/api/cache-stats") {
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify(cacheStats()));
+    return;
+  }
+
   // --- API: Account Status / Login Verification ---
   if (pathname === "/api/account") {
     const token = resolveToken(query.token || req.headers["authorization"]);
@@ -363,7 +427,7 @@ const server = http.createServer(async (req, res) => {
 
     try {
       const searchUrl = `https://api.music.yandex.net/search?text=${encodeURIComponent(text)}&type=track&page=0`;
-      const result = await yandexRequest(searchUrl, token);
+      const result = await yandexCached(searchUrl, token, 5 * 60 * 1000);
       const items = result.data?.tracks?.results || result.data?.result?.tracks?.items || [];
       const cleanTracks = items.map((t) => ({
         id: String(t.id),
@@ -407,10 +471,10 @@ const server = http.createServer(async (req, res) => {
       }
       const uid = accInfo.user.uid;
 
-      // 2. Get liked track IDs
-      const likes = await yandexRequest(
+      // 2. Get liked track IDs (short TTL: user can like something at any moment)
+      const likes = await yandexCached(
         `https://api.music.yandex.net/users/${uid}/likes/tracks`,
-        token
+        token, 60 * 1000
       );
       const rawLibrary = likes.data?.result ?? likes.data ?? {};
       const likesList = rawLibrary?.library?.tracks || rawLibrary?.tracks || [];
@@ -421,10 +485,10 @@ const server = http.createServer(async (req, res) => {
         return;
       }
 
-      // 3. Fetch full track info in a single batch request
-      const tracksResp = await yandexRequest(
+      // 3. Fetch full track info in a single batch request (track metadata is stable — long TTL)
+      const tracksResp = await yandexCached(
         `https://api.music.yandex.net/tracks?track-ids=${encodeURIComponent(ids.join(","))}`,
-        token
+        token, 10 * 60 * 1000
       );
       // The API may return the array at the top level or wrapped in {"result": [...]}
       const items = Array.isArray(tracksResp.data)
@@ -750,6 +814,10 @@ if (pathname === "/api/like" && req.method === "POST") {
     );
     const revision = addRemove.data?.revision ?? addRemove.data?.result?.revision ?? null;
     const ok = addRemove.status === 200;
+    if (ok) {
+      // The user's like library has changed — drop cached likes so the fresh state shows up
+      invalidateApiCache("/likes/tracks");
+    }
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ ok, liked: !body.remove, status: addRemove.status, revision }));
   } catch (e) {
@@ -775,8 +843,9 @@ if (pathname === "/api/like-status") {
       res.end(JSON.stringify({ likedIds: [] }));
       return;
     }
-    const likes = await yandexRequest(
-      `https://api.music.yandex.net/users/${accInfo.user.uid}/likes/tracks`, token
+    const likes = await yandexCached(
+      `https://api.music.yandex.net/users/${accInfo.user.uid}/likes/tracks`, token,
+      60 * 1000
     );
     const rl = likes.data?.result ?? likes.data ?? {};
     const lib = rl?.library?.tracks || rl?.tracks || [];
@@ -805,27 +874,35 @@ if (pathname === "/api/playlists") {
       res.end(JSON.stringify({ playlists: [], guest: true }));
       return;
     }
-    const resp = await yandexRequest(
-      `https://api.music.yandex.net/users/${accInfo.user.uid}/playlists`,
-      token
+    // Yandex deprecated /users/{uid}/playlists (now requires `kinds`);
+    // /playlists/list returns the full playlist list for the account.
+    const resp = await yandexCached(
+      `https://api.music.yandex.net/users/${accInfo.user.uid}/playlists/list`,
+      token, 5 * 60 * 1000
     );
     const lists = Array.isArray(resp.data)
       ? resp.data
       : resp.data?.result || [];
     const clean = lists
       .filter((p) => p.kind != null)
-      .map((p) => ({
-        kind: p.kind,
-        uid: p.uid || accInfo.user.uid,
-        title: p.title || "Без названия",
-        trackCount: p.trackCount || (p.tracks ? p.tracks.length : 0),
-        coverUri: p.coverUri
-          ? "https://" + p.coverUri.replace("%%", "200x200")
-          : p.ogImage
-          ? "https://" + p.ogImage.replace("%%", "200x200")
-          : null,
-        revised: p.revised || null,
-      }));
+      .map((p) => {
+        let coverUri = null;
+        if (p.coverUri) {
+          coverUri = "https://" + p.coverUri.replace("%%", "200x200");
+        } else if (Array.isArray(p.cover?.itemsUri) && p.cover.itemsUri[0]) {
+          coverUri = "https://" + p.cover.itemsUri[0].replace("%%", "200x200");
+        } else if (p.ogImage) {
+          coverUri = "https://" + p.ogImage.replace("%%", "200x200");
+        }
+        return {
+          kind: p.kind,
+          uid: p.uid || accInfo.user.uid,
+          title: p.title || "Без названия",
+          trackCount: p.trackCount || (p.tracks ? p.tracks.length : 0),
+          coverUri,
+          revised: p.revised || null,
+        };
+      });
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ playlists: clean }));
   } catch (e) {
@@ -852,9 +929,9 @@ if (pathname === "/api/playlist-tracks") {
       res.end(JSON.stringify({ error: "Token invalid" }));
       return;
     }
-    const resp = await yandexRequest(
+    const resp = await yandexCached(
       `https://api.music.yandex.net/users/${accInfo.user.uid}/playlists/${encodeURIComponent(String(kind))}`,
-      token
+      token, 5 * 60 * 1000
     );
     const playlist = resp.data?.result || {};
     // Playlist track briefs: {id, albumId} — resolve full info in one batch
@@ -863,9 +940,9 @@ if (pathname === "/api/playlist-tracks") {
 
     let byId = new Map();
     if (ids.length) {
-      const tr = await yandexRequest(
+      const tr = await yandexCached(
         `https://api.music.yandex.net/tracks?track-ids=${encodeURIComponent(ids.join(","))}`,
-        token
+        token, 10 * 60 * 1000
       );
       const items = Array.isArray(tr.data) ? tr.data : tr.data?.result || [];
       byId = new Map(items.map((t) => [String(t.id), t]));
@@ -886,7 +963,6 @@ if (pathname === "/api/playlist-tracks") {
           : t.ogImage
           ? "https://" + t.ogImage.replace("%%", "200x200")
           : null,
-        albumId: t.albums && t.albums[0] ? String(t.albums[0].id) : null,
         durationMs: t.durationMs || 0,
       }));
     res.writeHead(200, { "Content-Type": "application/json" });
