@@ -564,8 +564,14 @@ function updateTrackUI(track) {
   miniArtist.textContent = track.artists;
   miniCover.src = track.coverUri || FALLBACK_COVER;
 
-  // Highlight currently playing track in the search list
-  document.querySelectorAll(".track-item.playing").forEach((el) => el.classList.remove("playing"));
+  // Highlight currently playing track in search/likes/playlist lists.
+  // Сначала полный сброс: класс + иконка на ВСЕХ ранее подсвеченных элементах,
+  // иначе у прошлого трека навсегда остаётся fa-pause.
+  document.querySelectorAll(".track-item.playing").forEach((el) => {
+    el.classList.remove("playing");
+    const staleIcon = el.querySelector(".track-play-btn i");
+    if (staleIcon) staleIcon.className = "fa-solid fa-play";
+  });
   const activeItem = document.querySelector(`.track-item[data-track-id="${CSS.escape(String(track.id))}"]`);
   if (activeItem) {
     activeItem.classList.add("playing");
@@ -903,8 +909,12 @@ function renderTrackList(tracks, container, countEl, countLabel) {
     });
     container.appendChild(item);
 
-    // Mark the track that is already playing in this session
-    if (currentTrack && String(currentTrack.id) === String(track.id)) item.classList.add("playing");
+    // Mark the track that is already playing in this session (класс + иконка)
+    if (currentTrack && String(currentTrack.id) === String(track.id)) {
+      item.classList.add("playing");
+      const icon = playBtn.querySelector("i");
+      if (icon) icon.className = "fa-solid fa-pause";
+    }
   });
 }
 
@@ -1165,10 +1175,14 @@ async function openPlaylist(pl) {
       playlistTracks.innerHTML =
         '<div class="likes-empty-state"><i class="fa-solid fa-list"></i><p>Плейлист пуст</p></div>';
     }
-    // Mark the playing track if it is in this playlist
+    // Mark the playing track if it is in this playlist (класс + иконка)
     if (currentTrack) {
       const it = playlistTracks.querySelector(`.track-item[data-track-id="${CSS.escape(String(currentTrack.id))}"]`);
-      if (it) it.classList.add("playing");
+      if (it) {
+        it.classList.add("playing");
+        const icon = it.querySelector(".track-play-btn i");
+        if (icon) icon.className = "fa-solid fa-pause";
+      }
     }
   } catch (e) {
     toast("Ошибка плейлиста: " + e.message);
