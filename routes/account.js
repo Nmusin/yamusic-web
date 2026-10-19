@@ -71,8 +71,22 @@ async function playAudioHandler(req, res, ctx) {
   }
 }
 
+// --- API: Client diagnostic log ---
+async function clientLogHandler(req, res, ctx) {
+  try {
+    const body = await ctx.parseBody(req);
+    console.log(`[CLIENT-LOG]`, JSON.stringify(body));
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ ok: true }));
+  } catch (e) {
+    res.writeHead(400, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ ok: false, error: e.message }));
+  }
+}
+
 module.exports = {
   cacheStatsHandler,
   accountHandler,
   playAudioHandler,
+  clientLogHandler,
 };

@@ -95,6 +95,8 @@ const ROUTES = {
   "/api/play-audio": (req, res) =>
     req.method === "POST" ? accountRoutes.playAudioHandler(req, res, ctx) : staticFallback(req, res),
   "/api/cache-stats": (req, res) => accountRoutes.cacheStatsHandler(req, res),
+  "/api/client-log": (req, res) =>
+    req.method === "POST" ? accountRoutes.clientLogHandler(req, res, ctx) : staticFallback(req, res),
 };
 
 // POST-only routes called with the wrong method fall through to static (старое поведение:
