@@ -3,12 +3,7 @@ const url = require("url");
 async function waveHandler(req, res, ctx) {
   const parsedUrl = url.parse(req.url, true);
   const query = parsedUrl.query;
-  const { ok, token } = ctx.resolveToken(req);
-  if (!ok) {
-    res.writeHead(401, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ error: "Unauthorized" }));
-    return;
-  }
+  const token = ctx.resolveToken(query.token);
   const sessionId = query.sessionId || null;
 
   let targetUrl;
@@ -65,8 +60,8 @@ async function waveHandler(req, res, ctx) {
 async function rotorFeedbackHandler(req, res, ctx) {
   const parsedUrl = url.parse(req.url, true);
   const query = parsedUrl.query;
-  const { ok, token } = ctx.resolveToken(req);
-  if (!ok || !token) {
+  const token = ctx.resolveToken(query.token);
+  if (!token) {
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ ok: false, guest: true }));
     return;

@@ -3,8 +3,8 @@ const url = require("url");
 async function likesHandler(req, res, ctx) {
   const parsedUrl = url.parse(req.url, true);
   const query = parsedUrl.query;
-  const { ok, token } = ctx.resolveToken(req);
-  if (!ok || !token) {
+  const token = ctx.resolveToken(query.token);
+  if (!token) {
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ tracks: [], guest: true }));
     return;
@@ -68,8 +68,8 @@ async function likesHandler(req, res, ctx) {
 async function likeHandler(req, res, ctx) {
   const parsedUrl = url.parse(req.url, true);
   const query = parsedUrl.query;
-  const { ok, token } = ctx.resolveToken(req);
-  if (!ok || !token) {
+  const token = ctx.resolveToken(query.token);
+  if (!token) {
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ ok: false, guest: true }));
     return;
@@ -116,9 +116,9 @@ async function likeHandler(req, res, ctx) {
 async function likeStatusHandler(req, res, ctx) {
   const parsedUrl = url.parse(req.url, true);
   const query = parsedUrl.query;
-  const { ok, token } = ctx.resolveToken(req);
+  const token = ctx.resolveToken(query.token);
   const ids = String(query.ids || "").split(",").filter(Boolean);
-  if (!ok || !token || ids.length === 0) {
+  if (!token || ids.length === 0) {
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ likedIds: [] }));
     return;
