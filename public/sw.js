@@ -1,15 +1,30 @@
 // Service Worker: честный кеш оболочки приложения.
 // Только GET; /api/* всегда мимо кеша; остальное — network-first с кеш-фолбэком.
 
-const CACHE = "ym-shell-v2";
+const CACHE = "ym-shell-v3";
 
 const PRECACHE = [
   "/",
   "/index.html",
   "/style.css",
-  "/app.js",
   "/manifest.json",
   "/icon.svg",
+  "/js/main.js",
+  "/js/state.js",
+  "/js/dom.js",
+  "/js/util.js",
+  "/js/api.js",
+  "/js/session-memory.js",
+  "/js/audio-engine.js",
+  "/js/wave.js",
+  "/js/likes-core.js",
+  "/js/tracks-lists.js",
+  "/js/track-sheet.js",
+  "/js/player-screen.js",
+  "/js/media-session.js",
+  "/js/nav.js",
+  "/js/auth.js",
+  "/js/pwa.js",
 ];
 
 self.addEventListener("install", (event) => {
