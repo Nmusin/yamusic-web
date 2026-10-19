@@ -16,25 +16,15 @@ let quality = localStorage.getItem("ym_quality") || "nq";
 let oauthToken = getToken();
 let cachedUserStr = localStorage.getItem("ym_user");
 
-// --- Token persistence: localStorage + cookie fallback ---
-// (iOS Safari can wipe localStorage, the cookie survives)
-function setCookie(name, value, days) {
-  document.cookie = `${name}=${encodeURIComponent(value)}; Path=/; Max-Age=${days * 86400}; SameSite=Lax`;
-}
-function readCookie(name) {
-  const match = document.cookie.match(new RegExp("(?:^|; )" + name + "=([^;]*)"));
-  return match ? decodeURIComponent(match[1]) : null;
-}
+// --- Token persistence: localStorage (Android/desktop Chrome) ---
 function getToken() {
-  return localStorage.getItem("ym_token") || readCookie("ym_token") || "";
+  try { return localStorage.getItem("ym_token") || ""; } catch (e) { return ""; }
 }
 function saveToken(token) {
   try { localStorage.setItem("ym_token", token); } catch (e) {}
-  setCookie("ym_token", token, 365); // keep for a year
 }
 function clearToken() {
   try { localStorage.removeItem("ym_token"); } catch (e) {}
-  setCookie("ym_token", "", 0);
   try { localStorage.removeItem("ym_user"); } catch (e) {}
 }
 function saveUser(user) {
@@ -572,7 +562,7 @@ function updateTrackUI(track) {
   // MiniPlayer UI
   miniTitle.textContent = track.title;
   miniArtist.textContent = track.artists;
-  miniCover.src = track.coverUri || "";
+  miniCover.src = track.coverUri || FALLBACK_COVER;
 
   // Highlight currently playing track in the search list
   document.querySelectorAll(".track-item.playing").forEach((el) => el.classList.remove("playing"));
@@ -774,6 +764,7 @@ async function fetchMoreWaveTracks() {
 
 // Search Logic
 let searchTimeout = null;
+let searchController = null; // отменяет устаревший запрос, если пришёл новый
 
 function performSearch(query) {
   const q = query.trim();
@@ -799,16 +790,25 @@ function performSearch(query) {
   searchResults.innerHTML = "";
 
   searchTimeout = setTimeout(async () => {
+    // Новая обводка отменяет старый in-flight запрос (race: старый ответ мог бы перезаписать новый)
+    if (searchController) searchController.abort();
+    searchController = new AbortController();
+    const ctl = searchController;
     try {
       let searchUrl = `/api/search?q=${encodeURIComponent(q)}`;
       if (oauthToken) searchUrl += `&token=${encodeURIComponent(oauthToken)}`;
-      const res = await fetch(searchUrl);
+      const res = await fetch(searchUrl, { signal: ctl.signal });
       const data = await res.json();
+      if (searchController !== ctl) return; // пришёл более новый запрос
       renderSearchResults(data.tracks || []);
     } catch (e) {
+      if (e.name === "AbortError") return;
       searchResults.innerHTML = `<p style="text-align:center; color:#ff5252; padding:20px;">Ошибка поиска: ${e.message}</p>`;
     } finally {
-      searchLoader.classList.add("hidden");
+      if (searchController === ctl) {
+        searchController = null;
+        searchLoader.classList.add("hidden");
+      }
     }
   }, 350);
 }
@@ -822,6 +822,8 @@ searchInput.addEventListener("focus", () => {
 });
 
 searchClearBtn.addEventListener("click", () => {
+  clearTimeout(searchTimeout);
+  if (searchController) { searchController.abort(); searchController = null; }
   searchInput.value = "";
   searchClearBtn.classList.add("hidden");
   searchCount.textContent = "";

@@ -9,7 +9,7 @@ const stream = require("stream");
 const PORT = process.env.PORT || 3000;
 const SECRET_KEY = "kzqU4XhfCaY6B6JTHODeq5";
 const CLIENT_HEADER = "YandexMusicDesktopAppWindows/5.46.2";
-let lastToken = null; // last token seen in requests (for quality tests)
+
 
 // --- .env loader (KEY=VALUE lines; YM_TOKEN used as default account token) ---
 const ENV_FILE = path.join(__dirname, ".env");
@@ -25,22 +25,10 @@ try {
 } catch (e) {}
 
 let DEFAULT_TOKEN = process.env.YM_TOKEN || "";
-function updateDefaultToken() {
-  // re-read .env so a freshly saved token works without restart
-  try {
-    if (fs.existsSync(ENV_FILE)) {
-      for (const line of fs.readFileSync(ENV_FILE, "utf8").split("\n")) {
-        const trimmed = line.trim();
-        if (!trimmed || trimmed.startsWith("#")) continue;
-        const m = /^\s*([A-Z0-9_]+)\s*=\s*(.+?)\s*$/.exec(line);
-        if (m) process.env[m[1]] = m[2];
-      }
-    }
-  } catch (e) {}
-  return process.env.YM_TOKEN || "";
-}
+// Токен берётся только из запроса или из .env — без глобального
+// "последнего виденного" (иначе аккаунты разных клиентов смешиваются)
 function resolveToken(qt) {
-  return qt || lastToken || DEFAULT_TOKEN || null;
+  return qt || DEFAULT_TOKEN || null;
 }
 
 // Official Yandex Music OAuth credentials (from MarshalX/yandex-music-token)
@@ -81,6 +69,7 @@ function yandexRequest(targetUrl, token, method = "GET", postData = null) {
         }
       });
     });
+    req.setTimeout(15000, () => req.destroy(new Error("Yandex API timeout")));
     req.on("error", reject);
     if (postData) {
       req.write(JSON.stringify(postData));
@@ -111,17 +100,28 @@ function httpsPostForm(targetUrl, params) {
         }
       });
     });
+    req.setTimeout(15000, () => req.destroy(new Error("OAuth timeout")));
     req.on("error", reject);
     req.write(body);
     req.end();
   });
 }
 
-function parseBody(req) {
+function parseBody(req, limit = 1024 * 1024) {
   return new Promise((resolve) => {
     let body = "";
-    req.on("data", (chunk) => (body += chunk));
+    let tooLarge = false;
+    req.on("data", (chunk) => {
+      if (tooLarge) return;
+      if ((body += chunk).length > limit) {
+        tooLarge = true;
+        req.destroy(); // отрубаем соединение — тело слишком большое
+        return;
+      }
+    });
+    req.on("error", () => resolve({}));
     req.on("end", () => {
+      if (tooLarge) return resolve({});
       try {
         resolve(JSON.parse(body));
       } catch (e) {
@@ -180,6 +180,23 @@ function cacheStats() {
   return { entries: apiCache.size, totalHits: hits, limit: API_CACHE_LIMIT };
 }
 
+// Пакетное разрешение полных треков по id: у API есть лимит на размер запроса,
+// поэтому длинные списки (большие библиотеки лайков) дробим на чанки
+const TRACKS_BATCH_SIZE = 300;
+async function fetchTracksByIds(ids, token) {
+  const items = [];
+  for (let i = 0; i < ids.length; i += TRACKS_BATCH_SIZE) {
+    const chunk = ids.slice(i, i + TRACKS_BATCH_SIZE);
+    const resp = await yandexCached(
+      `https://api.music.yandex.net/tracks?track-ids=${encodeURIComponent(chunk.join(","))}`,
+      token, 10 * 60 * 1000
+    );
+    const arr = Array.isArray(resp.data) ? resp.data : resp.data?.result;
+    if (Array.isArray(arr)) items.push(...arr);
+  }
+  return items;
+}
+
 // Resolve Yandex account info from a token. Tries /account/about, then /account/status.
 // Handles both nested ({result:{account:{uid}}}) and flat ({result:{uid}}) shapes.
 async function getAccountInfo(token) {
@@ -224,19 +241,7 @@ const server = http.createServer(async (req, res) => {
   const pathname = parsedUrl.pathname;
   const query = parsedUrl.query;
 
-  // Remember the most recent valid-looking token (used for server-side tests)
-  if (query.token && String(query.token).length > 30) lastToken = String(query.token);
-
-  // CORS headers
-  res.setHeader("Access-Control-Allow-Origin", "*");
-  res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
-
-  if (req.method === "OPTIONS") {
-    res.writeHead(200);
-    res.end();
-    return;
-  }
+  // Remember nothing server-side: токен всегда приходит с запросом
 
   console.log(`[REQ] ${req.method} ${pathname}`);
 
@@ -352,37 +357,6 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  // --- API: Save current/last token into .env (survives server restarts) ---
-  if (pathname === "/api/save-token") {
-    const token = resolveToken(null);
-    if (!token) {
-      res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ saved: false, error: "No token in memory — open the app first" }));
-      return;
-    }
-    try {
-      let envContent = "";
-      if (fs.existsSync(ENV_FILE)) {
-        envContent = fs.readFileSync(ENV_FILE, "utf8")
-          .split("\n")
-          .filter((l) => !/^\s*YM_TOKEN\s*=/.test(l))
-          .join("\n");
-      }
-      if (envContent && !envContent.endsWith("\n")) envContent += "\n";
-      envContent += `YM_TOKEN=${token}\n`;
-      fs.writeFileSync(ENV_FILE, envContent);
-      process.env.YM_TOKEN = updateDefaultToken(); // pick it up immediately without restart
-      DEFAULT_TOKEN = process.env.YM_TOKEN;
-      console.log("[ENV] Token saved to .env");
-      res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ saved: true }));
-    } catch (e) {
-      res.writeHead(500, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ saved: false, error: e.message }));
-    }
-    return;
-  }
-
   // --- API: cache diagnostics ---
   if (pathname === "/api/cache-stats") {
     res.writeHead(200, { "Content-Type": "application/json" });
@@ -485,15 +459,8 @@ const server = http.createServer(async (req, res) => {
         return;
       }
 
-      // 3. Fetch full track info in a single batch request (track metadata is stable — long TTL)
-      const tracksResp = await yandexCached(
-        `https://api.music.yandex.net/tracks?track-ids=${encodeURIComponent(ids.join(","))}`,
-        token, 10 * 60 * 1000
-      );
-      // The API may return the array at the top level or wrapped in {"result": [...]}
-      const items = Array.isArray(tracksResp.data)
-        ? tracksResp.data
-        : tracksResp.data?.result || [];
+      // 3. Fetch full track info in batched requests (track metadata is stable — long TTL)
+      const items = await fetchTracksByIds(ids, token);
 
       // Preserve the order the user liked them (newest first)
       const byId = new Map(items.map((t) => [String(t.id), t]));
@@ -619,13 +586,15 @@ function httpsHead(targetUrl) {
   return new Promise((resolve, reject) => {
     const req = https.request(targetUrl, { method: "HEAD" }, (res) => {
       res.resume();
+      clearTimeout(t);
       resolve({
         status: res.statusCode,
         contentLength: parseInt(res.headers["content-length"] || "0", 10),
         contentType: res.headers["content-type"] || "",
       });
     });
-    req.on("error", reject);
+    const t = setTimeout(() => req.destroy(new Error("HEAD timeout")), 15000);
+    req.on("error", (e) => { clearTimeout(t); reject(e); });
     req.end();
   });
 }
@@ -940,11 +909,7 @@ if (pathname === "/api/playlist-tracks") {
 
     let byId = new Map();
     if (ids.length) {
-      const tr = await yandexCached(
-        `https://api.music.yandex.net/tracks?track-ids=${encodeURIComponent(ids.join(","))}`,
-        token, 10 * 60 * 1000
-      );
-      const items = Array.isArray(tr.data) ? tr.data : tr.data?.result || [];
+      const items = await fetchTracksByIds(ids, token);
       byId = new Map(items.map((t) => [String(t.id), t]));
     }
 
@@ -1016,8 +981,13 @@ if (pathname === "/api/playlist-tracks") {
       const storageReq = (withRange) => new Promise((resolve) => {
         const headers = {};
         if (withRange && rangeStart) headers["Range"] = `bytes=${rangeStart}-`;
-        const r = https.get(streamUrl, { headers }, (upRes) => resolve(upRes));
-        r.on("error", () => resolve(null));
+        const r = https.get(streamUrl, { headers }, (upRes) => {
+          clearTimeout(t);
+          resolve(upRes);
+        });
+        // 30s неактивности = storage недоступен / завис
+        const t = setTimeout(() => r.destroy(new Error("storage timeout")), 30000);
+        r.on("error", (e) => { clearTimeout(t); resolve(null); });
       });
 
       let audioRes = await storageReq(!!rangeStart);
@@ -1058,9 +1028,20 @@ if (pathname === "/api/playlist-tracks") {
       // If storage ignored Range and replied 200 with the whole file — start keystream at 0
       const decStart = rangeStart && audioRes.statusCode === 206 ? rangeStart : 0;
       const dec = ctrDecipherAt(keyBuffer, decStart);
+
+      // Ошибки в пайпе не должны ронять весь процесс: подстраховываемся на всех звеньях
+      const onRespError = () => { try { res.destroy(); } catch (e) {} };
+      const onClientError = () => { try { audioRes.destroy(); } catch (e) {} };
+      audioRes.on("error", onRespError);
+      res.on("error", onClientError);
+      res.on("close", () => { try { audioRes.destroy(); } catch (e) {} });
+
       if (dec instanceof stream.Transform) {
+        dec.on("error", onRespError);
         audioRes.pipe(dec).pipe(res);
       } else {
+        dec.transform.on("error", onRespError);
+        dec.readable.on("error", onRespError);
         audioRes.pipe(dec.transform).pipe(res);
       }
     } catch (e) {
@@ -1070,8 +1051,22 @@ if (pathname === "/api/playlist-tracks") {
     return;
   }
 
-  // --- Static Files ---
-  let filePath = path.join(__dirname, "public", pathname === "/" ? "index.html" : pathname);
+  // --- Static Files --- (только файлы внутри public, никакого path traversal)
+  let relativePath;
+  try {
+    relativePath = decodeURIComponent(pathname === "/" ? "index.html" : pathname);
+  } catch (e) {
+    res.writeHead(400, { "Content-Type": "text/plain" });
+    res.end("400 Bad Request");
+    return;
+  }
+  const publicRoot = path.join(__dirname, "public");
+  const filePath = path.normalize(path.join(publicRoot, relativePath));
+  if (!filePath.startsWith(publicRoot + path.sep)) {
+    res.writeHead(403, { "Content-Type": "text/plain" });
+    res.end("403 Forbidden");
+    return;
+  }
   const extname = path.extname(filePath);
   const mimeTypes = {
     ".html": "text/html",
