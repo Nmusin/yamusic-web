@@ -1295,8 +1295,9 @@ body {
   width: 32px;
   height: 32px;
   border-radius: 50%;
-  background: rgba(255, 255, 255, 0.06);
-  border: none;
+  /* AMOLED: чёрная круглая кнопка с тонкой рамкой */
+  background: #000;
+  border: 1px solid rgba(255, 255, 255, 0.14);
   color: #999;
   font-size: 15px;
   cursor: pointer;
@@ -1387,8 +1388,10 @@ body {
 }
 
 .sheet-btn-secondary {
-  background: rgba(255, 255, 255, 0.08);
+  /* AMOLED: чёрная поверхность, а не rgba-патч (#121212-подобный) */
+  background: #000;
   color: #fff;
+  border: 1px solid rgba(255, 255, 255, 0.14);
 }
 
 .sheet-btn-primary {
@@ -1412,10 +1415,11 @@ body {
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  background: #ffcc00;
-  color: #000;
-  border: none;
-  border-radius: 22px;
+  /* AMOLED standalone-кнопка-плашка: чёрный фон, жёлтая рамка/текст */
+  background: #000;
+  color: #ffcc00;
+  border: 1px solid #ffcc00;
+  border-radius: 24px;
   font-size: 14px;
   font-weight: 700;
   padding: 11px 22px;
